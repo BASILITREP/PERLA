@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "161206561416",
+    "project_id": "pearl-24846",
+    "storage_bucket": "pearl-24846.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:161206561416:android:7a929464bbd6bac3d2cd3d",
+        "android_client_info": {
+          "package_name": "com.equicom.pearlisms"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArZv7MHDZD5yhVxwOEA9ceOO1VbODJ8fI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:161206561416:android:0030b1d0d9fdfaa0d2cd3d",
+        "android_client_info": {
+          "package_name": "com.example.app_app_test"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArZv7MHDZD5yhVxwOEA9ceOO1VbODJ8fI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
