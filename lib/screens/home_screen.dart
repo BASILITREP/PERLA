@@ -570,6 +570,12 @@ Future<void> _addCircleMarker(Position coordinates) async {
         }),
       );
 
+      if (acceptResponse.statusCode == 200) {
+  print('Service request accepted successfully.');
+} else {
+  print('Failed to accept service request: ${acceptResponse.statusCode}');
+}
+
       print('Accept response: ${acceptResponse.statusCode}');
       print('Accept response body: ${acceptResponse.body}');
 
