@@ -144,7 +144,7 @@ class _LoginPageState extends State<LoginPage> {
 
                   // Header Text
                   const Text(
-                    'Welcome to PEARL!',
+                    'Welcome to MAPA!',
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,

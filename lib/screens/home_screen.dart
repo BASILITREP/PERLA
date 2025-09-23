@@ -11,7 +11,10 @@ import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:ui' as ui;
-
+import 'package:geolocator/geolocator.dart' as geolocator;
+import '../services/location_service.dart';
+import 'dart:async'; // For Timer
+import 'package:location/location.dart'; // For LocationData
 
 
 
@@ -34,6 +37,10 @@ class _MyHomePageState extends State<MyHomePage> {
   MapboxMap? _mapboxController;
   final GlobalKey _branchIconKey = GlobalKey();
   Uint8List? _branchIconBytes;
+  late final LocationService _locationService;
+  StreamSubscription<geolocator.Position>? _positionStream;
+  Timer? _proximityCheckTimer;
+  StreamSubscription<LocationData>? _locationStreamSubscription;
 
   // FCM and Local Notifications
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
@@ -45,6 +52,14 @@ class _MyHomePageState extends State<MyHomePage> {
     _initializeFCM();
     fetchServiceRequests();
     fetchBranches();
+    // Initialize and start the location service
+    _locationService = LocationService(fieldEngineerId: widget.fieldEngineer['id']);
+    _locationService.start();
+
+    _locationStreamSubscription = _locationService.onLocationChanged.listen((LocationData newLocation) {
+      // This will be called every time the GPS reports a new position
+      _updateFeMarkerOnMap(newLocation);
+    });
 
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -57,6 +72,42 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     });
   });
+  }
+
+  @override
+  void dispose() {
+    _locationService.stop(); // Stop the service when the widget is disposed
+    _proximityCheckTimer?.cancel();
+    _locationStreamSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _updateFeMarkerOnMap(LocationData locationData) async {
+    if (_mapboxController == null || locationData.latitude == null || locationData.longitude == null) {
+      return;
+    }
+    
+    // This is much more efficient than removing and re-adding the layer.
+    // We update the data of the existing GeoJSON source.
+    try {
+      final source = await _mapboxController!.style.getSource("circle-source");
+      if (source is GeoJsonSource) {
+        source.updateGeoJSON(json.encode({
+          "type": "FeatureCollection",
+          "features": [
+            {
+              "type": "Feature",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [locationData.longitude, locationData.latitude]
+              },
+            }
+          ]
+        }));
+      }
+    } catch (e) {
+      print("Error updating FE marker: $e");
+    }
   }
 
   //branch marker
@@ -144,6 +195,100 @@ class _MyHomePageState extends State<MyHomePage> {
     print("Error adding branch markers: $e");
   }
 }
+
+//check proximity
+void _startProximityCheck(Map<String, dynamic> route, dynamic branch) {
+  _proximityCheckTimer?.cancel(); // Cancel any previous timer
+
+  _proximityCheckTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+    final location = Location();
+    final currentLocation = await location.getLocation();
+    
+    if (currentLocation.latitude == null || currentLocation.longitude == null) return;
+
+    double distanceInMeters = geolocator.Geolocator.distanceBetween(
+      currentLocation.latitude!,
+      currentLocation.longitude!,
+      branch['latitude'].toDouble(),
+      branch['longitude'].toDouble(),
+    );
+
+    print('📏 Distance to destination: ${distanceInMeters.toStringAsFixed(2)} meters.');
+
+    if (distanceInMeters <= 5.0) {
+      print('🎉 Route complete! FE is within 5 meters of the branch.');
+      _completeRoute(route);
+      timer.cancel(); // Stop checking once the destination is reached
+    }
+  });
+}
+
+
+//complete route
+void _completeRoute(Map<String, dynamic> route) async {
+  final int serviceRequestId = route['serviceRequestId'];
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('✅ Route to ${route['branchName']} complete!'),
+      backgroundColor: Colors.green,
+    ),
+  );
+
+
+  setState(() {
+    ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
+  });
+
+  try{
+    final url = Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/complete');
+    final response = await http.post(url);
+
+    if (response.statusCode == 200){
+      print("✅ Service request marked as complete.");
+
+    }else{
+      print("❌ Failed to mark service request as complete. Status: ${response.statusCode}");
+    }
+  } catch(e){
+    print("❌ Error marking service request as complete: $e");
+  }
+  
+}
+
+ //draw polyline
+  Future<void> _drawRouteOnMap(List<dynamic> coordinates) async {
+    if (_mapboxController == null) return;
+
+    const String routeSourceId = "route-source";
+    const String routeLayerId = "route-layer";
+
+    try {
+      // Clear any existing route first
+      final layerExists = await _mapboxController!.style.styleLayerExists(routeLayerId);
+      if (layerExists) await _mapboxController!.style.removeStyleLayer(routeLayerId);
+      final sourceExists = await _mapboxController!.style.styleSourceExists(routeSourceId);
+      if (sourceExists) await _mapboxController!.style.removeStyleSource(routeSourceId);
+      
+      final Map<String, dynamic> routeGeoJson = {
+        "type": "Feature",
+        "geometry": {"type": "LineString", "coordinates": coordinates}
+      };
+
+      await _mapboxController!.style.addSource(GeoJsonSource(id: routeSourceId, data: json.encode(routeGeoJson)));
+
+      await _mapboxController!.style.addLayer(LineLayer(
+        id: routeLayerId,
+        sourceId: routeSourceId,
+        lineColor: Colors.blue.value,
+        lineWidth: 5.0,
+        lineOpacity: 0.8,
+      ));
+      print('✅ Route polyline drawn on map.');
+    } catch (e) {
+      print('❌ Error drawing route: $e');
+    }
+  }
 
   Future<Uint8List?> _captureIconAsBytes() async {
   try {
@@ -543,153 +688,269 @@ Future<void> _addCircleMarker(Position coordinates) async {
   }
 
   Future<void> acceptServiceRequest(int serviceRequestId) async {
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            content: Row(
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(width: 20),
-                Text('Accepting request...'),
-              ],
-            ),
-          );
-        },
-      );
-
-      final acceptResponse = await http.post(
-        Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/accept'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({
-          'fieldEngineerId': widget.fieldEngineer['id'],
-        }),
-      );
-
-      if (acceptResponse.statusCode == 200) {
-  print('Service request accepted successfully.');
-} else {
-  print('Failed to accept service request: ${acceptResponse.statusCode}');
-}
-
-      print('Accept response: ${acceptResponse.statusCode}');
-      print('Accept response body: ${acceptResponse.body}');
-
-      if (acceptResponse.statusCode == 200) {
-        final serviceRequest = serviceRequests.firstWhere(
-          (sr) => sr['id'] == serviceRequestId,
-          orElse: () => null,
-        );
-
-        if (serviceRequest != null) {
-          final branch = branches.firstWhere(
-            (b) => b['id'].toString() == serviceRequest['branchId'].toString(),
-            orElse: () => null,
-          );
-
-          if (branch != null) {
-            final routeData = await getMapboxRoute(
-              widget.fieldEngineer['currentLatitude'].toDouble(),
-              widget.fieldEngineer['currentLongitude'].toDouble(),
-              branch['latitude'].toDouble(),
-              branch['longitude'].toDouble(),
-            );
-
-            if (routeData != null) {
-              final routeCoordinates = routeData['geometry']['coordinates'];
-              final startTime = DateTime.now().toLocal();
-              final durationMinutes = (routeData['duration'] / 60).round();
-              final etaTime = startTime.add(Duration(minutes: durationMinutes));
-              final distanceInKm = routeData['distance'] / 1000;
-
-              await startFieldEngineerNavigation(
-                widget.fieldEngineer['id'],
-                widget.fieldEngineer['name'],
-                routeCoordinates,
-              );
-
-              final newRouteData = {
-                'id': DateTime.now().millisecondsSinceEpoch,
-                'feId': widget.fieldEngineer['id'],
-                'feName': widget.fieldEngineer['name'],
-                'branchId': branch['id'],
-                'branchName': branch['name'],
-                'startTime': startTime.toLocal().toString().substring(11, 16),
-                'estimatedArrival': etaTime.toLocal().toString().substring(11, 16),
-                'distance': formatDistance(routeData['distance'].toDouble()),
-                'duration': '${durationMinutes} min',
-                'price': calculateFare(distanceInKm),
-                'status': 'in-progress',
-                'serviceRequestId': serviceRequestId,
-                'routeCoordinates': routeCoordinates,
-              };
-
-              await createNewRoute(newRouteData);
-              await triggerWebAdminUpdate(serviceRequestId, widget.fieldEngineer['id']);
-
-              setState(() {
-                ongoingRoutes.add(newRouteData);
-              });
-
-              Navigator.of(context).pop();
-              
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('✅ Service request accepted!\n🚗 Navigation started!\n📍 Web admin updated!'),
-                  backgroundColor: Colors.green,
-                  duration: Duration(seconds: 3),
-                ),
-              );
-
-              await Future.delayed(Duration(seconds: 2));
-              fetchServiceRequests();
-
-            } else {
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Service request accepted, but failed to get route'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
-            }
-          } else {
-            Navigator.of(context).pop();
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Service request accepted, but branch not found'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-        }
-      } else {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to accept request: ${acceptResponse.statusCode}'),
-            backgroundColor: Colors.red,
+  try {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text('Accepting request...'),
+            ],
           ),
         );
-      }
-    } catch (e) {
-      if (Navigator.canPop(context)) {
-        Navigator.of(context).pop();
-      }
+      },
+    );
+
+    final acceptResponse = await http.post(
+      Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/accept'),
+      headers: { 'Content-Type': 'application/json' },
+      body: json.encode({ 'fieldEngineerId': widget.fieldEngineer['id'] }),
+    );
+
+    if (acceptResponse.statusCode == 200) {
+      print('✅ Service request accepted by backend.');
       
-      print('Error accepting request: $e');
+      // *** NEW LOGIC STARTS HERE ***
+      // Now, let's build the route for the mobile UI
+      final serviceRequest = serviceRequests.firstWhere((sr) => sr['id'] == serviceRequestId, orElse: () => null);
+      if (serviceRequest == null) throw Exception('Could not find local service request data.');
+
+      final branch = branches.firstWhere((b) => b['id'].toString() == serviceRequest['branchId'].toString(), orElse: () => null);
+      if (branch == null) throw Exception('Could not find local branch data.');
+
+      // Get route geometry and details from Mapbox
+      final routeData = await getMapboxRoute(
+        widget.fieldEngineer['currentLatitude'].toDouble(),
+        widget.fieldEngineer['currentLongitude'].toDouble(),
+        branch['latitude'].toDouble(),
+        branch['longitude'].toDouble(),
+      );
+
+      if (routeData != null) {
+        final durationMinutes = (routeData['duration'] / 60).round();
+        final distanceInKm = routeData['distance'] / 1000;
+        final etaTime = DateTime.now().add(Duration(minutes: durationMinutes));
+
+        // Create the local route object for the UI
+        final newRouteForUI = {
+          'id': DateTime.now().millisecondsSinceEpoch, // Use a client-side unique ID
+          'feId': widget.fieldEngineer['id'],
+          'feName': widget.fieldEngineer['name'],
+          'branchId': branch['id'],
+          'branchName': branch['name'],
+          'startTime': DateTime.now().toLocal().toString().substring(11, 16),
+          'estimatedArrival': etaTime.toLocal().toString().substring(11, 16),
+          'distance': formatDistance(routeData['distance'].toDouble()),
+          'duration': '${durationMinutes} min',
+          'price': calculateFare(distanceInKm),
+          'status': 'in-progress',
+          'serviceRequestId': serviceRequestId,
+          // Storing coordinates is optional but useful for drawing polylines later
+          'routeCoordinates': routeData['geometry']['coordinates'], 
+        };
+
+        //darw route
+        _drawRouteOnMap(newRouteForUI['routeCoordinates']);
+
+        //check proximity
+        _startProximityCheck(newRouteForUI, branch);
+
+        // Update the UI state to show the new route
+        setState(() {
+          ongoingRoutes.add(newRouteForUI);
+        });
+
+        Navigator.of(context).pop(); // Hide loading spinner
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Request accepted and route created!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+      } else {
+        throw Exception('Failed to get route from Mapbox.');
+      }
+      // *** NEW LOGIC ENDS HERE ***
+
+      // Refresh the service request list to remove the accepted one
+      fetchServiceRequests();
+
+    } else {
+      Navigator.of(context).pop(); // Hide loading spinner on failure
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error accepting request: $e'),
+          content: Text('Failed to accept request: ${acceptResponse.body}'),
           backgroundColor: Colors.red,
         ),
       );
     }
+  } catch (e) {
+    if (Navigator.canPop(context)) {
+      Navigator.of(context).pop();
+    }
+    print('❌ Error in acceptServiceRequest: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
+}
+
+//   Future<void> acceptServiceRequest(int serviceRequestId) async {
+//     try {
+//       showDialog(
+//         context: context,
+//         barrierDismissible: false,
+//         builder: (BuildContext context) {
+//           return AlertDialog(
+//             content: Row(
+//               children: [
+//                 CircularProgressIndicator(),
+//                 SizedBox(width: 20),
+//                 Text('Accepting request...'),
+//               ],
+//             ),
+//           );
+//         },
+//       );
+
+//       final acceptResponse = await http.post(
+//         Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/accept'),
+//         headers: {
+//           'Content-Type': 'application/json',
+//         },
+//         body: json.encode({
+//           'fieldEngineerId': widget.fieldEngineer['id'],
+//         }),
+//       );
+
+//       if (acceptResponse.statusCode == 200) {
+//   print('Service request accepted successfully.');
+// } else {
+//   print('Failed to accept service request: ${acceptResponse.statusCode}');
+// }
+
+//       print('Accept response: ${acceptResponse.statusCode}');
+//       print('Accept response body: ${acceptResponse.body}');
+
+//       if (acceptResponse.statusCode == 200) {
+//         final serviceRequest = serviceRequests.firstWhere(
+//           (sr) => sr['id'] == serviceRequestId,
+//           orElse: () => null,
+//         );
+
+//         if (serviceRequest != null) {
+//           final branch = branches.firstWhere(
+//             (b) => b['id'].toString() == serviceRequest['branchId'].toString(),
+//             orElse: () => null,
+//           );
+
+//           if (branch != null) {
+//             final routeData = await getMapboxRoute(
+//               widget.fieldEngineer['currentLatitude'].toDouble(),
+//               widget.fieldEngineer['currentLongitude'].toDouble(),
+//               branch['latitude'].toDouble(),
+//               branch['longitude'].toDouble(),
+//             );
+
+//             if (routeData != null) {
+//               final routeCoordinates = routeData['geometry']['coordinates'];
+//               final startTime = DateTime.now().toLocal();
+//               final durationMinutes = (routeData['duration'] / 60).round();
+//               final etaTime = startTime.add(Duration(minutes: durationMinutes));
+//               final distanceInKm = routeData['distance'] / 1000;
+
+//               await startFieldEngineerNavigation(
+//                 widget.fieldEngineer['id'],
+//                 widget.fieldEngineer['name'],
+//                 routeCoordinates,
+//               );
+
+//               final newRouteData = {
+//                 'id': DateTime.now().millisecondsSinceEpoch,
+//                 'feId': widget.fieldEngineer['id'],
+//                 'feName': widget.fieldEngineer['name'],
+//                 'branchId': branch['id'],
+//                 'branchName': branch['name'],
+//                 'startTime': startTime.toLocal().toString().substring(11, 16),
+//                 'estimatedArrival': etaTime.toLocal().toString().substring(11, 16),
+//                 'distance': formatDistance(routeData['distance'].toDouble()),
+//                 'duration': '${durationMinutes} min',
+//                 'price': calculateFare(distanceInKm),
+//                 'status': 'in-progress',
+//                 'serviceRequestId': serviceRequestId,
+//                 'routeCoordinates': routeCoordinates,
+//               };
+
+//               await createNewRoute(newRouteData);
+//               await triggerWebAdminUpdate(serviceRequestId, widget.fieldEngineer['id']);
+
+//               setState(() {
+//                 ongoingRoutes.add(newRouteData);
+//               });
+
+//               Navigator.of(context).pop();
+              
+//               ScaffoldMessenger.of(context).showSnackBar(
+//                 SnackBar(
+//                   content: Text('✅ Service request accepted!\n🚗 Navigation started!\n📍 Web admin updated!'),
+//                   backgroundColor: Colors.green,
+//                   duration: Duration(seconds: 3),
+//                 ),
+//               );
+
+//               await Future.delayed(Duration(seconds: 2));
+//               fetchServiceRequests();
+
+//             } else {
+//               Navigator.of(context).pop();
+//               ScaffoldMessenger.of(context).showSnackBar(
+//                 SnackBar(
+//                   content: Text('Service request accepted, but failed to get route'),
+//                   backgroundColor: Colors.orange,
+//                 ),
+//               );
+//             }
+//           } else {
+//             Navigator.of(context).pop();
+//             ScaffoldMessenger.of(context).showSnackBar(
+//               SnackBar(
+//                 content: Text('Service request accepted, but branch not found'),
+//                 backgroundColor: Colors.orange,
+//               ),
+//             );
+//           }
+//         }
+//       } else {
+//         Navigator.of(context).pop();
+//         ScaffoldMessenger.of(context).showSnackBar(
+//           SnackBar(
+//             content: Text('Failed to accept request: ${acceptResponse.statusCode}'),
+//             backgroundColor: Colors.red,
+//           ),
+//         );
+//       }
+//     } catch (e) {
+//       if (Navigator.canPop(context)) {
+//         Navigator.of(context).pop();
+//       }
+      
+//       print('Error accepting request: $e');
+//       ScaffoldMessenger.of(context).showSnackBar(
+//         SnackBar(
+//           content: Text('Error accepting request: $e'),
+//           backgroundColor: Colors.red,
+//         ),
+//       );
+//     }
+//   }
 
   Future<void> stopNavigation(Map<String, dynamic> route) async {
     try {
