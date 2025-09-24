@@ -10,9 +10,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     
     <application
-        android:label="PERLA Field Engineer"
+        android:label="PEARL"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/equicom">
         
         <activity
             android:name=".MainActivity"

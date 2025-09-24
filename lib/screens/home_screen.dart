@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:ui' as ui;
+import 'dart:ui'; // Import for BackdropFilter
 import 'package:geolocator/geolocator.dart' as geolocator;
 import '../services/location_service.dart';
 import 'dart:async'; // For Timer
@@ -41,6 +42,8 @@ class _MyHomePageState extends State<MyHomePage> {
   StreamSubscription<geolocator.Position>? _positionStream;
   Timer? _proximityCheckTimer;
   StreamSubscription<LocationData>? _locationStreamSubscription;
+  bool _isNavigationMode = false;
+  Map<String, dynamic>? _activeNavigationRoute;
 
   // FCM and Local Notifications
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
@@ -59,6 +62,17 @@ class _MyHomePageState extends State<MyHomePage> {
     _locationStreamSubscription = _locationService.onLocationChanged.listen((LocationData newLocation) {
       // This will be called every time the GPS reports a new position
       _updateFeMarkerOnMap(newLocation);
+      if (_isNavigationMode && _mapboxController != null && newLocation.latitude != null && newLocation.longitude != null) {
+    _mapboxController!.flyTo(
+      CameraOptions(
+        center: Point(coordinates: Position(newLocation.longitude!, newLocation.latitude!)),
+        zoom: 16.0, // Zoom in closer for navigation
+        bearing: newLocation.heading, // Orient the map to the direction of travel
+        pitch: 60.0, // Tilt the map for a 3D perspective
+      ),
+      MapAnimationOptions(duration: 1500), // Animate the camera movement
+    );
+  }
     });
 
 
@@ -223,6 +237,27 @@ void _startProximityCheck(Map<String, dynamic> route, dynamic branch) {
   });
 }
 
+void _stopNavigationMode() {
+  setState(() {
+    _isNavigationMode = false;
+    _activeNavigationRoute = null;
+  });
+  _proximityCheckTimer?.cancel(); // Stop checking distance
+
+  // Optional: Reset camera to a default view
+  if (_mapboxController != null) {
+    _mapboxController!.flyTo(
+      CameraOptions(
+        center: Point(coordinates: Position(120.9842, 14.5995)), // Default center
+        zoom: 12.0,
+        bearing: 0,
+        pitch: 0,
+      ),
+      MapAnimationOptions(duration: 1000),
+    );
+  }
+}
+
 
 //complete route
 void _completeRoute(Map<String, dynamic> route) async {
@@ -234,6 +269,7 @@ void _completeRoute(Map<String, dynamic> route) async {
       backgroundColor: Colors.green,
     ),
   );
+  _stopNavigationMode();
 
 
   setState(() {
@@ -753,14 +789,15 @@ Future<void> _addCircleMarker(Position coordinates) async {
           'routeCoordinates': routeData['geometry']['coordinates'], 
         };
 
-        //darw route
-        _drawRouteOnMap(newRouteForUI['routeCoordinates']);
+        
 
         //check proximity
         _startProximityCheck(newRouteForUI, branch);
 
         // Update the UI state to show the new route
         setState(() {
+          _isNavigationMode = true;
+          _activeNavigationRoute = newRouteForUI;
           ongoingRoutes.add(newRouteForUI);
         });
 
@@ -775,13 +812,11 @@ Future<void> _addCircleMarker(Position coordinates) async {
       } else {
         throw Exception('Failed to get route from Mapbox.');
       }
-      // *** NEW LOGIC ENDS HERE ***
-
-      // Refresh the service request list to remove the accepted one
+ 
       fetchServiceRequests();
 
     } else {
-      Navigator.of(context).pop(); // Hide loading spinner on failure
+      Navigator.of(context).pop(); 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to accept request: ${acceptResponse.body}'),
@@ -993,6 +1028,10 @@ Future<void> _addCircleMarker(Position coordinates) async {
 
    @override
 Widget build(BuildContext context) {
+  if (_isNavigationMode){
+    return _buildNavigationView();  
+    }
+    else{
   return Stack(
     children: [
       Scaffold(
@@ -1061,8 +1100,187 @@ Widget build(BuildContext context) {
       ),
     ],
   );
+    }
 }
 
+
+Widget _buildNavigationView() {
+  // Ensure we have an active route before building
+  if (_activeNavigationRoute == null) {
+    return const Scaffold(body: Center(child: Text("Loading Navigation...")));
+  }
+
+  return Scaffold(
+    body: Stack(
+      children: [
+        // The map takes up the full screen
+        _buildMapboxMap(),
+
+        // Glassmorphism Top Panel
+        Positioned(
+  top: 40,
+  left: 10,
+  right: 10,
+  child: SafeArea(
+    // NEW: We wrap the content in our glassmorphism widgets
+    child: Container(
+      // The main container provides the shape, border, and shadow
+      decoration: BoxDecoration(
+        color: Colors.grey.shade400.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.black.withOpacity(  0.1),
+          width: 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+          )
+        ],
+      ),
+      // Clip the blur to the rounded corners
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        
+        // Apply the blur effect
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+          // The actual content goes here, inside another Container for padding
+          child: Container(
+            padding: const EdgeInsets.all(12.0),
+            child: Row(
+              children: [
+                const Icon(Icons.navigation, color: Colors.white, size: 40),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Proceed to destination",
+                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black.withOpacity(0.5))]),
+                      ),
+                      Text(
+                        _activeNavigationRoute!['branchName'],
+                        style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                )
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  ),
+),
+        // Positioned(
+        //   top: 40,
+        //   left: 10,
+        //   right: 10,
+        //   child: SafeArea(
+        //     child: Card(
+        //       elevation: 8,
+        //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        //       child: Container(
+        //         padding: const EdgeInsets.all(12.0),
+        //         decoration: BoxDecoration(
+        //           color: Colors.blue.shade700,
+        //           borderRadius: BorderRadius.circular(12)
+        //         ),
+        //         child: Row(
+        //           children: [
+        //             const Icon(Icons.navigation, color: Colors.white, size: 40),
+        //             const SizedBox(width: 10),
+        //             Expanded(
+        //               child: Column(
+        //                 crossAxisAlignment: CrossAxisAlignment.start,
+        //                 children: [
+        //                   Text(
+        //                     "Proceed to destination", // This would be dynamic in a real turn-by-turn app
+        //                     style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+        //                   ),
+        //                   Text(
+        //                     _activeNavigationRoute!['branchName'],
+        //                     style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14),
+        //                     overflow: TextOverflow.ellipsis,
+        //                   ),
+        //                 ],
+        //               ),
+        //             )
+        //           ],
+        //         ),
+        //       ),
+        //     ),
+        //   ),
+        // ),
+
+        // Bottom Summary Panel
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.grey.shade400.withOpacity(0.5),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
+              border: Border.all(color: Colors.black.withOpacity(0.1), width: 1.5),
+            ),
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildNavigationInfo("ETA", _activeNavigationRoute!['estimatedArrival'], Icons.access_time),
+                          _buildNavigationInfo("Distance", _activeNavigationRoute!['distance'], Icons.straighten),
+                          _buildNavigationInfo("Fare", _activeNavigationRoute!['price'], Icons.attach_money),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _stopNavigationMode,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        ),
+                        child: const Text("End Navigation"),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+
+Widget _buildNavigationInfo(String label, String value, IconData icon) {
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, color: Colors.white70, size: 24),
+      const SizedBox(height: 4),
+      Text(value, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+      Text(label, style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12)),
+    ],
+  );
+}
 
 
   Widget _buildMapboxMap() {
@@ -1118,43 +1336,62 @@ Widget build(BuildContext context) {
   } else {
     print("❌ Cannot add branch markers. Dependencies are missing.");
   }
+
+  if (_isNavigationMode && _activeNavigationRoute != null) {
+        print("✅ In Navigation Mode, drawing route...");
+        await _drawRouteOnMap(_activeNavigationRoute!['routeCoordinates']);
+      }
 },
     );
   }
 
-  /// Builds the draggable bottom sheet.
   Widget _buildBottomSheet() {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.4, // Starts at 40% of the screen height
-      minChildSize: 0.15,     // Can be dragged down to 15%
-      maxChildSize: 0.9,      // Can be dragged up to 90%
-      builder: (BuildContext context, ScrollController scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20.0)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.2),
-                blurRadius: 10,
-                spreadRadius: 2,
-              )
-            ],
+  return DraggableScrollableSheet(
+    initialChildSize: 0.4, // Starts at 40% of the screen height
+    minChildSize: 0.15,    // Can be dragged down to 15%
+    maxChildSize: 0.9,     // Can be dragged up to 90%
+    builder: (BuildContext context, ScrollController scrollController) {
+  
+      return Container(
+        decoration: BoxDecoration(
+      
+          color: Colors.white.withOpacity(0.35),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
+ 
+          border: Border.all(
+            color: Colors.black.withOpacity(0.2),
+            width: 1.5,
           ),
-          child: ListView(
-            controller: scrollController, // Important for scroll/drag behavior
-            padding: EdgeInsets.zero,
-            children: [
-              _buildDragHandle(),
-              //if (fcmToken != null) _buildFcmStatusBanner(),
-              _buildOngoingRoutesPanel(),
-              _buildServiceRequestsList(),
-            ],
+          boxShadow: [
+
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              spreadRadius: 2,
+            )
+          ],
+        ),
+ 
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
+
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 15.0, sigmaY: 15.0),
+            child: ListView(
+              controller: scrollController, 
+              padding: EdgeInsets.zero,
+              children: [
+                _buildDragHandle(),
+                _buildOngoingRoutesPanel(),
+                _buildServiceRequestsList(),
+              ],
+            ),
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
 
   Widget _buildDragHandle() {
@@ -1164,7 +1401,7 @@ Widget build(BuildContext context) {
         height: 5,
         margin: const EdgeInsets.symmetric(vertical: 12.0),
         decoration: BoxDecoration(
-          color: Colors.grey[300],
+          color: Colors.grey[400],
           borderRadius: BorderRadius.circular(12),
         ),
       ),
@@ -1198,13 +1435,21 @@ Widget build(BuildContext context) {
       margin: EdgeInsets.all(12.0),
       padding: EdgeInsets.all(16.0),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.lightBlue.shade800, Colors.lightBlue.shade600],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
+      color: Colors.white.withOpacity(0.15), // A slightly different tint
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(
+        color: Colors.black.withOpacity(0.1),
+        width: 1.0,
       ),
+    ),
+      // decoration: BoxDecoration(
+      //   gradient: LinearGradient(
+      //     colors: [Colors.lightBlue.shade800, Colors.lightBlue.shade600],
+      //     begin: Alignment.topLeft,
+      //     end: Alignment.bottomRight,
+      //   ),
+      //   borderRadius: BorderRadius.circular(12),
+      // ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1214,7 +1459,7 @@ Widget build(BuildContext context) {
               Text(
                 'Ongoing Routes',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: Colors.grey,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -1247,20 +1492,21 @@ Widget build(BuildContext context) {
               child: Center(
                 child: Column(
                   children: [
-                    Icon(Icons.directions_off, color: Colors.white70, size: 32),
+                    Icon(Icons.directions_off, color: Colors.grey, size: 32),
                     SizedBox(height: 8),
                     Text(
                       'No active routes at the moment',
                       style: TextStyle(
-                        color: Colors.white70,
+                        color: Colors.grey,
                         fontSize: 14,
+                        fontWeight: FontWeight.bold
                       ),
                     ),
                     SizedBox(height: 4),
                     Text(
                       'Accept a service request to start navigation',
                       style: TextStyle(
-                        color: Colors.white54,
+                        color: Colors.grey,
                         fontSize: 12,
                       ),
                     ),
@@ -1299,7 +1545,7 @@ Widget build(BuildContext context) {
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: statusColor.withOpacity(0.3)),
+                          border: Border.all(color: Colors.black.withOpacity(0.1)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1313,12 +1559,12 @@ Widget build(BuildContext context) {
                                     children: [
                                       Row(
                                         children: [
-                                          Icon(Icons.person, color: Colors.white, size: 16),
+                                          Icon(Icons.person, color: Colors.grey, size: 16),
                                           SizedBox(width: 4),
                                           Text(
                                             route['feName'],
                                             style: TextStyle(
-                                              color: Colors.white,
+                                              color: Colors.grey,
                                               fontWeight: FontWeight.bold,
                                               fontSize: 16,
                                             ),
@@ -1327,13 +1573,13 @@ Widget build(BuildContext context) {
                                       ),
                                       Row(
                                         children: [
-                                          Icon(Icons.location_on, color: Colors.white70, size: 14),
+                                          Icon(Icons.location_on, color: Colors.grey, size: 14),
                                           SizedBox(width: 4),
                                           Expanded(
                                             child: Text(
                                               'to ${route['branchName']}',
                                               style: TextStyle(
-                                                color: Colors.white70,
+                                                color: Colors.grey,
                                                 fontSize: 12,
                                               ),
                                               overflow: TextOverflow.ellipsis,
@@ -1348,6 +1594,7 @@ Widget build(BuildContext context) {
                                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
                                     color: statusColor.withOpacity(0.8),
+                                    border: Border.all(color: Colors.black.withOpacity(0.1)),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(
@@ -1367,18 +1614,18 @@ Widget build(BuildContext context) {
                               children: [
                                 Column(
                                   children: [
-                                    Icon(Icons.straighten, color: Colors.white60, size: 14),
+                                    Icon(Icons.straighten, color: Colors.grey, size: 14),
                                     Text(
                                       'Distance',
                                       style: TextStyle(
-                                        color: Colors.white60,
+                                        color: Colors.grey,
                                         fontSize: 10,
                                       ),
                                     ),
                                     Text(
                                       route['distance'],
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: Colors.grey,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 12,
                                       ),
@@ -1387,18 +1634,18 @@ Widget build(BuildContext context) {
                                 ),
                                 Column(
                                   children: [
-                                    Icon(Icons.access_time, color: Colors.white60, size: 14),
+                                    Icon(Icons.access_time, color: Colors.grey, size: 14),
                                     Text(
                                       'ETA',
                                       style: TextStyle(
-                                        color: Colors.white60,
+                                        color: Colors.grey,
                                         fontSize: 10,
                                       ),
                                     ),
                                     Text(
                                       route['estimatedArrival'],
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: Colors.grey,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 12,
                                       ),
@@ -1407,18 +1654,18 @@ Widget build(BuildContext context) {
                                 ),
                                 Column(
                                   children: [
-                                    Icon(Icons.attach_money, color: Colors.white60, size: 14),
+                                    Icon(Icons.attach_money, color: Colors.grey, size: 14),
                                     Text(
                                       'Fare',
                                       style: TextStyle(
-                                        color: Colors.white60,
+                                        color: Colors.grey,
                                         fontSize: 10,
                                       ),
                                     ),
                                     Text(
                                       route['price'],
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: Colors.grey,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 12,
                                       ),
@@ -1438,7 +1685,7 @@ Widget build(BuildContext context) {
                                     Text(
                                       'Started: ${route['startTime']}',
                                       style: TextStyle(
-                                        color: Colors.white70,
+                                        color: Colors.grey,
                                         fontSize: 10,
                                       ),
                                     ),
@@ -1500,6 +1747,9 @@ Widget build(BuildContext context) {
   );
 }
 
+
+
+
 //Widget for bottom navigation bar
 Widget _buildBottomNavigationBar() {
   return BottomNavigationBar(
@@ -1520,6 +1770,94 @@ Widget _buildBottomNavigationBar() {
     
   );
 }
+Widget _buildServiceRequestCard(Map<String, dynamic> request) {
+  bool isAssignedToMe = request['fieldEngineerId'] == widget.fieldEngineer['id'];
+  bool isUnassigned = request['fieldEngineerId'] == null;
+  bool hasOngoingRoute = ongoingRoutes.any((route) => route['serviceRequestId'] == request['id']);
+
+  return Container(
+    margin: const EdgeInsets.only(bottom: 12.0),
+    padding: const EdgeInsets.all(16.0),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: Colors.black.withOpacity(0.1)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // Branch Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                   Text(
+            'Available Service Requests',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
+          ),
+                  const SizedBox(height: 7),
+                  Text(
+                    request['branch']?['name'] ?? 'Unknown Branch',
+                    style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 16),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.location_on, color: Colors.grey, size: 14),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          request['branch']?['address'] ?? 'No address',
+                          style: const TextStyle(color: Colors.grey, fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            // Status Tag
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: isUnassigned ? Colors.orange.withOpacity(0.8) : Colors.green.withOpacity(0.8),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                isUnassigned ? 'Pending' : (hasOngoingRoute ? 'Active' : 'Accepted'),
+                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        const Divider(color: Colors.white24, height: 24),
+        // Action Button
+        if (isUnassigned)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => {
+                HapticFeedback.lightImpact(),
+                acceptServiceRequest(request['id'])
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              icon: const Icon(Icons.check_circle_outline, size: 18),
+              label: const Text('Accept Request'),
+            ),
+          ),
+      ],
+    ),
+  );
+}
 
   Widget _buildServiceRequestsList() {
     return Padding(
@@ -1527,11 +1865,8 @@ Widget _buildBottomNavigationBar() {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Available Service Requests',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey.shade800),
-          ),
-          SizedBox(height: 8),
+         
+          const SizedBox(height: 2),
           if (isLoading)
             const Center(child: Padding(
               padding: EdgeInsets.all(32.0),
@@ -1545,119 +1880,20 @@ Widget _buildBottomNavigationBar() {
                 children: [
                   Icon(Icons.inbox_outlined, size: 64, color: Colors.grey),
                   SizedBox(height: 16),
-                  Text('No service requests found'),
+                  Text('No service requests found', style: TextStyle(color: Colors.grey, fontSize: 16)),
                 ],
               ),
             )
           else
 
-            Column(
-              children: serviceRequests.map((request) {
-                 bool isAssignedToMe = request['fieldEngineerId'] == widget.fieldEngineer['id'];
-                 bool isUnassigned = request['fieldEngineerId'] == null;
-                 bool hasOngoingRoute = ongoingRoutes.any((route) => route['serviceRequestId'] == request['id']);
-                 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 12.0),
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  color: isAssignedToMe ? Colors.green.shade50 : Colors.white,
-                  child: ListTile(
-                    // Your ListTile code from the original ListView.builder
-                     leading: CircleAvatar(
-                      backgroundColor: isUnassigned 
-                          ? Colors.orange 
-                          : isAssignedToMe 
-                              ? Colors.green 
-                              : Colors.grey,
-                      child: Text(
-                        '${request['id']}',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                    title: Text(
-                      'Service Request #${request['id']}',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Status: ${request['status'] ?? 'N/A'}'),
-                        Text('Branch: ${request['branch']?['name'] ?? 'N/A'}'),
-                        Text('Title: ${request['title'] ?? 'N/A'}'),
-                        Text('Description: ${request['description'] ?? 'N/A'}'),
-                        SizedBox(height: 4),
-                        if (isAssignedToMe && hasOngoingRoute)
-                          Row(
-                            children: [
-                              Icon(Icons.navigation, color: Colors.blue, size: 16),
-                              SizedBox(width: 4),
-                              Text(
-                                'Navigation Active', 
-                                style: TextStyle(
-                                  color: Colors.blue, 
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                )
-                              ),
-                            ],
-                          ),
-                        if (isAssignedToMe && !hasOngoingRoute)
-                          Row(
-                            children: [
-                              Icon(Icons.check_circle, color: Colors.green, size: 16),
-                              SizedBox(width: 4),
-                              Text(
-                                'Assigned to you', 
-                                style: TextStyle(
-                                  color: Colors.green, 
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                )
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                    trailing: isUnassigned
-                        ? ElevatedButton.icon(
-                            onPressed: () => acceptServiceRequest(request['id']),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            ),
-                            icon: Icon(Icons.check, size: 16),
-                            label: Text('Accept', style: TextStyle(fontSize: 12)),
-                          )
-                        : isAssignedToMe
-                            ? Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    hasOngoingRoute ? Icons.navigation : Icons.check_circle, 
-                                    color: hasOngoingRoute ? Colors.blue : Colors.green,
-                                    size: 24,
-                                  ),
-                                  Text(
-                                    hasOngoingRoute ? 'Active' : 'Accepted', 
-                                    style: TextStyle(
-                                      fontSize: 10, 
-                                      color: hasOngoingRoute ? Colors.blue : Colors.green,
-                                      fontWeight: FontWeight.bold,
-                                    )
-                                  ),
-                                ],
-                              )
-                            : Icon(Icons.person, color: Colors.grey),
-                  ),
-                );
-              }).toList(),
-            ),
+            ListView(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            children: serviceRequests
+                .map((request) => _buildServiceRequestCard(request))
+                .toList(),
+          ),
         ],
       ),
     );
