@@ -58,6 +58,9 @@ class _MyHomePageState extends State<MyHomePage> {
     // Initialize and start the location service
     _locationService = LocationService(fieldEngineerId: widget.fieldEngineer['id']);
     _locationService.start();
+    _checkForActiveAssignmentOnStartup();
+
+      
 
     _locationStreamSubscription = _locationService.onLocationChanged.listen((LocationData newLocation) {
       // This will be called every time the GPS reports a new position
@@ -248,7 +251,10 @@ void _stopNavigationMode() {
   if (_mapboxController != null) {
     _mapboxController!.flyTo(
       CameraOptions(
-        center: Point(coordinates: Position(120.9842, 14.5995)), // Default center
+        center: Point(coordinates: Position(
+          widget.fieldEngineer['currentLongitude'].toDouble(),
+          widget.fieldEngineer['currentLatitude'].toDouble(),
+        )), // Default center
         zoom: 12.0,
         bearing: 0,
         pitch: 0,
@@ -270,6 +276,7 @@ void _completeRoute(Map<String, dynamic> route) async {
     ),
   );
   _stopNavigationMode();
+  _locationService.stopHistoryBatching();
 
 
   setState(() {
@@ -393,6 +400,27 @@ Future<void> _addCircleMarker(Position coordinates) async {
     );
   } catch (e) {
     print('Error adding circle marker: $e');
+  }
+}
+
+Future<void> _checkForActiveAssignmentOnStartup() async {
+  try {
+    final response = await http.get(
+      Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/FieldEngineer/${widget.fieldEngineer['id']}/current-assignment'),
+    );
+
+    if (response.statusCode == 200 && response.body.isNotEmpty && response.body != "null") {
+      final assignment = json.decode(response.body);
+      if (assignment != null) {
+        print("✅ Found active assignment on startup. Resuming activity logging.");
+        _locationService.startHistoryBatching();
+        // Optional: You could also automatically put the user back into navigation mode here
+      } else {
+        print("ℹ️ No active assignment found on startup.");
+      }
+    }
+  } catch (e) {
+    print("Error checking for active assignment: $e");
   }
 }
 
@@ -793,6 +821,7 @@ Future<void> _addCircleMarker(Position coordinates) async {
 
         //check proximity
         _startProximityCheck(newRouteForUI, branch);
+        _locationService.startHistoryBatching();
 
         // Update the UI state to show the new route
         setState(() {
@@ -998,6 +1027,7 @@ Future<void> _addCircleMarker(Position coordinates) async {
           'fieldEngineerId': route['feId'],
         }),
       );
+      
 
       if (route['id'] != null) {
         await http.delete(
@@ -1007,9 +1037,11 @@ Future<void> _addCircleMarker(Position coordinates) async {
           },
         );
       }
+      _locationService.stopHistoryBatching();
 
       setState(() {
         ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
+         _proximityCheckTimer?.cancel();
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1434,22 +1466,22 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
     return Container(
       margin: EdgeInsets.all(12.0),
       padding: EdgeInsets.all(16.0),
+    //   decoration: BoxDecoration(
+    //   color: Colors.white.withOpacity(0.15), // A slightly different tint
+    //   borderRadius: BorderRadius.circular(12),
+    //   border: Border.all(
+    //     color: Colors.black.withOpacity(0.1),
+    //     width: 1.0,
+    //   ),
+    // ),
       decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.15), // A slightly different tint
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(
-        color: Colors.black.withOpacity(0.1),
-        width: 1.0,
+        gradient: LinearGradient(
+          colors: [Colors.white, Colors.white],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
       ),
-    ),
-      // decoration: BoxDecoration(
-      //   gradient: LinearGradient(
-      //     colors: [Colors.lightBlue.shade800, Colors.lightBlue.shade600],
-      //     begin: Alignment.topLeft,
-      //     end: Alignment.bottomRight,
-      //   ),
-      //   borderRadius: BorderRadius.circular(12),
-      // ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1619,7 +1651,8 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
                                       'Distance',
                                       style: TextStyle(
                                         color: Colors.grey,
-                                        fontSize: 10,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold
                                       ),
                                     ),
                                     Text(
@@ -1639,7 +1672,8 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
                                       'ETA',
                                       style: TextStyle(
                                         color: Colors.grey,
-                                        fontSize: 10,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold
                                       ),
                                     ),
                                     Text(
@@ -1659,7 +1693,8 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
                                       'Fare',
                                       style: TextStyle(
                                         color: Colors.grey,
-                                        fontSize: 10,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold
                                       ),
                                     ),
                                     Text(
@@ -1674,7 +1709,7 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
                                 ),
                               ],
                             ),
-                            SizedBox(height: 8),
+                            SizedBox(height: 18),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -1779,7 +1814,7 @@ Widget _buildServiceRequestCard(Map<String, dynamic> request) {
     margin: const EdgeInsets.only(bottom: 12.0),
     padding: const EdgeInsets.all(16.0),
     decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.1),
+      color: Colors.white,
       borderRadius: BorderRadius.circular(16),
       border: Border.all(color: Colors.black.withOpacity(0.1)),
     ),
@@ -1795,9 +1830,9 @@ Widget _buildServiceRequestCard(Map<String, dynamic> request) {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                    Text(
-            'Available Service Requests',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
-          ),
+                    'Available Service Requests',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
+                  ),
                   const SizedBox(height: 7),
                   Text(
                     request['branch']?['name'] ?? 'Unknown Branch',
