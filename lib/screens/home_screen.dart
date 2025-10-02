@@ -11,11 +11,16 @@ import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:ui' as ui;
-import 'dart:ui'; // Import for BackdropFilter
 import 'package:geolocator/geolocator.dart' as geolocator;
 import '../services/location_service.dart';
-import 'dart:async'; // For Timer
-import 'package:location/location.dart'; // For LocationData
+import 'dart:async'; 
+import 'package:location/location.dart'; 
+import 'package:url_launcher/url_launcher.dart'; 
+import 'dart:io' show Platform; 
+import 'package:intl/intl.dart';
+import 'package:geocoding/geocoding.dart' as geocoding;
+import 'package:battery_plus/battery_plus.dart';
+import 'package:timelines_plus/timelines_plus.dart';
 
 
 
@@ -44,6 +49,8 @@ class _MyHomePageState extends State<MyHomePage> {
   StreamSubscription<LocationData>? _locationStreamSubscription;
   bool _isNavigationMode = false;
   Map<String, dynamic>? _activeNavigationRoute;
+  final Battery _battery = Battery();
+  int _batteryLevel = 0;
 
   // FCM and Local Notifications
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
@@ -59,6 +66,7 @@ class _MyHomePageState extends State<MyHomePage> {
     _locationService = LocationService(fieldEngineerId: widget.fieldEngineer['id']);
     _locationService.start();
     _checkForActiveAssignmentOnStartup();
+    _fetchBatteryLevel();
 
       
 
@@ -99,6 +107,19 @@ class _MyHomePageState extends State<MyHomePage> {
     super.dispose();
   }
 
+  Future<void> _fetchBatteryLevel() async{
+    try{
+      final int batteryLevel = await _battery.batteryLevel;
+      setState(() {
+        _batteryLevel = batteryLevel;
+      });
+    } catch(e){
+      print("Error fetching battery level: $e");
+       
+      
+    }
+  }
+
   Future<void> _updateFeMarkerOnMap(LocationData locationData) async {
     if (_mapboxController == null || locationData.latitude == null || locationData.longitude == null) {
       return;
@@ -126,6 +147,51 @@ class _MyHomePageState extends State<MyHomePage> {
       print("Error updating FE marker: $e");
     }
   }
+
+  Future<void> _launchGoogleMapsNavigation(double lat, double lng) async {
+  Uri uri;
+
+  if (Platform.isAndroid) {
+    //  Android
+    uri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+  } else if (Platform.isIOS) {
+    // iOS
+    Uri googleMapsUri = Uri.parse('comgooglemaps://?daddr=$lat,$lng&directionsmode=driving');
+    if (await canLaunchUrl(googleMapsUri)) {
+      uri = googleMapsUri;
+    } else {
+    
+      uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+    }
+  } else {
+    
+     uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+  }
+
+  try {
+    await launchUrl(uri);
+  } catch (e) {
+    print('Could not launch $uri: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Could not open maps')),
+    );
+  }
+}
+
+//address
+Future<String> _getAddressFromCoordinates(double latitude, double longitude) async {
+  try {
+    List<geocoding.Placemark> placemarks = await geocoding.placemarkFromCoordinates(latitude, longitude);
+    if (placemarks.isNotEmpty) {
+      geocoding.Placemark place = placemarks.first;
+      return "${place.street}, ${place.locality}";
+    }
+    return "Address not found";
+  } catch (e) {
+    print("Error getting address: $e");
+    return "Error getting address";
+  }
+}
 
   //branch marker
   Future<void> _addBranchMarkers(List<dynamic> branches) async {
@@ -264,39 +330,126 @@ void _stopNavigationMode() {
   }
 }
 
-
-//complete route
 void _completeRoute(Map<String, dynamic> route) async {
-  final int serviceRequestId = route['serviceRequestId'];
+  // Hanapin ang active route sa ating listahan
+  int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
+  if (routeIndex != -1) {
+    setState(() {
+      // I-update ang status at magdagdag ng bagong event
+      ongoingRoutes[routeIndex]['status'] = 'arrived';
+      ongoingRoutes[routeIndex]['events'].add({
+        'status': 'Arrived',
+        'timestamp': DateTime.now(),
+      });
+    });
+  }
+
+  // Hindi na natin tatanggalin ang route sa listahan dito.
+  // Mananatili ito hanggang matapos ang serbisyo.
+  _proximityCheckTimer?.cancel(); // Itigil ang proximity check
 
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text('✅ Route to ${route['branchName']} complete!'),
+      content: Text('✅ You have arrived at ${route['branchName']}!'),
       backgroundColor: Colors.green,
     ),
   );
-  _stopNavigationMode();
-  _locationService.stopHistoryBatching();
-
-
-  setState(() {
-    ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
-  });
-
-  try{
-    final url = Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/complete');
-    final response = await http.post(url);
-
-    if (response.statusCode == 200){
-      print("✅ Service request marked as complete.");
-
-    }else{
-      print("❌ Failed to mark service request as complete. Status: ${response.statusCode}");
-    }
-  } catch(e){
-    print("❌ Error marking service request as complete: $e");
-  }
   
+  // Hindi na kailangan i-call ang stopHistoryBatching at stopNavigationMode dito
+}
+
+
+//complete route
+// void _completeRoute(Map<String, dynamic> route) async {
+//   final int serviceRequestId = route['serviceRequestId'];
+
+//   int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
+//   if (routeIndex != -1) {
+//     setState(() {
+//       // I-update ang status at magdagdag ng bagong event
+//       ongoingRoutes[routeIndex]['status'] = 'arrived';
+//       ongoingRoutes[routeIndex]['events'].add({
+//         'status': 'Arrived',
+//         'timestamp': DateTime.now(),
+//       });
+//     });
+//   }
+
+//   // Hindi na natin tatanggalin ang route sa listahan dito.
+//   // Mananatili ito hanggang matapos ang serbisyo.
+//   _proximityCheckTimer?.cancel(); // Itigil ang proximity check
+
+//   ScaffoldMessenger.of(context).showSnackBar(
+//     SnackBar(
+//       content: Text('✅ You have arrived at ${route['branchName']}!'),
+//       backgroundColor: Colors.green,
+//     ),
+//   );
+
+
+//   setState(() {
+//     ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
+//   });
+
+//   try{
+//     final url = Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/complete');
+//     final response = await http.post(url);
+
+//     if (response.statusCode == 200){
+//       print("✅ Service request marked as complete.");
+
+//     }else{
+//       print("❌ Failed to mark service request as complete. Status: ${response.statusCode}");
+//     }
+//   } catch(e){
+//     print("❌ Error marking service request as complete: $e");
+//   }
+  
+// }
+
+//finish service
+void _finishService(Map<String, dynamic> route){
+  int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
+  if (routeIndex != -1){
+    setState(() {
+      ongoingRoutes[routeIndex]['status'] = 'finished';
+      ongoingRoutes[routeIndex]['events'].add({
+        'status': 'Finished',
+        'timestamp': DateTime.now(),
+      });
+    });
+    // Dito mo pwedeng i-call yung API para i-update ang backend na tapos na ang serbisyo
+    _proximityCheckTimer?.cancel();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('✅ Service at ${route['branchName']} marked as finished.'),
+        backgroundColor: Colors.green,
+      ),
+    );
+    
+  }
+}
+
+//leave branch
+void _leaveBranch(Map<String, dynamic> route) {
+  int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
+  if (routeIndex != -1) {
+    setState(() {
+      ongoingRoutes[routeIndex]['status'] = 'left';
+      ongoingRoutes[routeIndex]['events'].add({
+        'status': 'Left Branch',
+        'timestamp': DateTime.now(),
+      });
+      // Pagka-leave, pwede na nating tanggalin sa active routes after a delay
+      Future.delayed(Duration(seconds: 5), () {
+        setState(() {
+          ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
+        });
+        _locationService.stopHistoryBatching();
+        fetchServiceRequests();
+      });
+    });
+  }
 }
 
  //draw polyline
@@ -776,75 +929,66 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
     );
 
     if (acceptResponse.statusCode == 200) {
-      print('✅ Service request accepted by backend.');
-      
-      // *** NEW LOGIC STARTS HERE ***
-      // Now, let's build the route for the mobile UI
-      final serviceRequest = serviceRequests.firstWhere((sr) => sr['id'] == serviceRequestId, orElse: () => null);
-      if (serviceRequest == null) throw Exception('Could not find local service request data.');
+    print('✅ Service request accepted by backend.');
 
-      final branch = branches.firstWhere((b) => b['id'].toString() == serviceRequest['branchId'].toString(), orElse: () => null);
-      if (branch == null) throw Exception('Could not find local branch data.');
+    final serviceRequest = serviceRequests.firstWhere((sr) => sr['id'] == serviceRequestId, orElse: () => null);
+    if (serviceRequest == null) throw Exception('Could not find local service request data.');
 
-      // Get route geometry and details from Mapbox
-      final routeData = await getMapboxRoute(
-        widget.fieldEngineer['currentLatitude'].toDouble(),
-        widget.fieldEngineer['currentLongitude'].toDouble(),
-        branch['latitude'].toDouble(),
-        branch['longitude'].toDouble(),
-      );
+    final branch = branches.firstWhere((b) => b['id'].toString() == serviceRequest['branchId'].toString(), orElse: () => null);
+    if (branch == null) throw Exception('Could not find local branch data.');
+    
+    final routeData = await getMapboxRoute(
+      widget.fieldEngineer['currentLatitude'].toDouble(),
+      widget.fieldEngineer['currentLongitude'].toDouble(),
+      branch['latitude'].toDouble(),
+      branch['longitude'].toDouble(),
+    );
 
-      if (routeData != null) {
-        final durationMinutes = (routeData['duration'] / 60).round();
-        final distanceInKm = routeData['distance'] / 1000;
-        final etaTime = DateTime.now().add(Duration(minutes: durationMinutes));
-
-        // Create the local route object for the UI
-        final newRouteForUI = {
-          'id': DateTime.now().millisecondsSinceEpoch, // Use a client-side unique ID
-          'feId': widget.fieldEngineer['id'],
-          'feName': widget.fieldEngineer['name'],
-          'branchId': branch['id'],
-          'branchName': branch['name'],
-          'startTime': DateTime.now().toLocal().toString().substring(11, 16),
-          'estimatedArrival': etaTime.toLocal().toString().substring(11, 16),
-          'distance': formatDistance(routeData['distance'].toDouble()),
-          'duration': '${durationMinutes} min',
-          'price': calculateFare(distanceInKm),
-          'status': 'in-progress',
-          'serviceRequestId': serviceRequestId,
-          // Storing coordinates is optional but useful for drawing polylines later
-          'routeCoordinates': routeData['geometry']['coordinates'], 
-        };
-
-        
-
-        //check proximity
-        _startProximityCheck(newRouteForUI, branch);
-        _locationService.startHistoryBatching();
-
-        // Update the UI state to show the new route
-        setState(() {
-          _isNavigationMode = true;
-          _activeNavigationRoute = newRouteForUI;
-          ongoingRoutes.add(newRouteForUI);
-        });
-
-        Navigator.of(context).pop(); // Hide loading spinner
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Request accepted and route created!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-
-      } else {
-        throw Exception('Failed to get route from Mapbox.');
+    // --- BAGONG DATA STRUCTURE PARA SA TIMELINE ---
+    final newRouteForUI = {
+      'id': DateTime.now().millisecondsSinceEpoch,
+      'feId': widget.fieldEngineer['id'],
+      'feName': widget.fieldEngineer['name'],
+      'branchId': branch['id'],
+      'branchName': branch['name'],
+      'serviceRequestId': serviceRequestId,
+      'status': 'in-transit', // Initial status
+      'events': [ 
+        {
+          'status': 'Accepted',
+          'timestamp': DateTime.now(),
+        },
+        {
+          'status': 'In Transit',
+          'timestamp': DateTime.now(),
+        },
+      ],
+      // Magdagdag ng route details kung meron
+      if (routeData != null) ...{
+        'estimatedArrival': DateTime.now().add(Duration(seconds: (routeData['duration'] as double).round())),
+        'distance': formatDistance(routeData['distance'].toDouble()),
+        'price': calculateFare(routeData['distance'] / 1000),
       }
- 
-      fetchServiceRequests();
+    };
 
-    } else {
+    setState(() {
+      ongoingRoutes.add(newRouteForUI);
+    });
+
+    _startProximityCheck(newRouteForUI, branch); // Simulan ang pag-check kung malapit na
+    _locationService.startHistoryBatching();
+    _launchGoogleMapsNavigation(branch['latitude'].toDouble(), branch['longitude'].toDouble());
+    
+    Navigator.of(context).pop(); // Itago ang loading spinner
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('✅ Request accepted! Opening Google Maps...'),
+        backgroundColor: Colors.green,
+      ),
+    );
+
+    fetchServiceRequests();
+  } else {
       Navigator.of(context).pop(); 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1099,7 +1243,7 @@ Widget build(BuildContext context) {
               child: CircleAvatar(
                 backgroundColor: Colors.white,
                 child: IconButton(
-                  icon: Icon(Icons.person, color: Colors.blue.shade800),
+                  icon: Icon(Icons.settings, color: Colors.blue.shade800),
                   onPressed: _showFieldEngineerInfoDialog,
                 ),
               ),
@@ -1379,7 +1523,7 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
 
   Widget _buildBottomSheet() {
   return DraggableScrollableSheet(
-    initialChildSize: 0.4, // Starts at 40% of the screen height
+    initialChildSize: 0.6, // Starts at 40% of the screen height
     minChildSize: 0.15,    // Can be dragged down to 15%
     maxChildSize: 0.9,     // Can be dragged up to 90%
     builder: (BuildContext context, ScrollController scrollController) {
@@ -1414,8 +1558,17 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
               padding: EdgeInsets.zero,
               children: [
                 _buildDragHandle(),
+                
+                _buildFieldEngineerProfile(),
+                Divider(color: Colors.black26, thickness: 1, height: 20, indent: 16, endIndent: 16),
+                //_buildPillButtons(),
+                
                 _buildOngoingRoutesPanel(),
+                 if (ongoingRoutes.isNotEmpty)
+                _buildServiceRequestTimeline(ongoingRoutes.first) 
+              else
                 _buildServiceRequestsList(),
+                
               ],
             ),
           ),
@@ -1462,128 +1615,124 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
 
   /// Ongoing Routes" panel
   Widget _buildOngoingRoutesPanel() {
-
-    return Container(
-      margin: EdgeInsets.all(12.0),
-      padding: EdgeInsets.all(16.0),
-    //   decoration: BoxDecoration(
-    //   color: Colors.white.withOpacity(0.15), // A slightly different tint
-    //   borderRadius: BorderRadius.circular(12),
-    //   border: Border.all(
-    //     color: Colors.black.withOpacity(0.1),
-    //     width: 1.0,
-    //   ),
-    // ),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.white, Colors.white],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
+  return Container(
+    margin: EdgeInsets.all(12.0),
+    padding: EdgeInsets.all(16.0),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        colors: [Colors.white, Colors.white],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Ongoing Routes',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Ongoing Routes',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.yellow.shade300,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${ongoingRoutes.length}',
-                  style: TextStyle(
-                    color: Colors.black,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 12),
-          if (ongoingRoutes.isEmpty)
+            ),
             Container(
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.yellow.shade300,
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: Center(
-                child: Column(
-                  children: [
-                    Icon(Icons.directions_off, color: Colors.grey, size: 32),
-                    SizedBox(height: 8),
-                    Text(
-                      'No active routes at the moment',
-                      style: TextStyle(
+              child: Text(
+                '${ongoingRoutes.length}',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 12),
+        if (ongoingRoutes.isEmpty)
+          // ... (yung 'No active routes' widget mo, walang babaguhin dito)
+          Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(Icons.directions_off, color: Colors.grey, size: 32),
+                  SizedBox(height: 8),
+                  Text(
+                    'No active routes at the moment',
+                    style: TextStyle(
                         color: Colors.grey,
                         fontSize: 14,
-                        fontWeight: FontWeight.bold
-                      ),
+                        fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Accept a service request to start navigation',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 12,
                     ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Accept a service request to start navigation',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            )
-          else
+            ),
+          )
+        else
+          Column(
+            children: ongoingRoutes.map((route) {
+              final status = route['status'] as String;
+              Color statusColor;
+              String statusText;
 
-             Column(
-                    children: ongoingRoutes.map((route) {
-                      Color statusColor;
-                      String statusText;
-                      
-                      switch (route['status']) {
-                        case 'in-progress':
-                          statusColor = Colors.blue;
-                          statusText = 'In Progress';
-                          break;
-                        case 'delayed':
-                          statusColor = Colors.red;
-                          statusText = 'Delayed';
-                          break;
-                        case 'arriving':
-                          statusColor = Colors.green;
-                          statusText = 'Arriving Soon';
-                          break;
-                        default:
-                          statusColor = Colors.grey;
-                          statusText = 'Unknown';
-                      }
+              switch (status) {
+                case 'in-transit':
+                  statusColor = Colors.blue;
+                  statusText = 'In Progress';
+                  break;
+                case 'arrived':
+                  statusColor = Colors.green;
+                  statusText = 'Arrived';
+                  break;
+                case 'finished':
+                   statusColor = Colors.purple;
+                   statusText = 'Finished';
+                   break;
+                default:
+                  statusColor = Colors.grey;
+                  statusText = status;
+              }
 
-                      return Container(
-                        margin: EdgeInsets.only(bottom: 8),
-                        padding: EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.black.withOpacity(0.1)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              // --- KINUHA NATIN ANG MGA EVENTS DITO ---
+              final events = route['events'] as List;
+              final startTimeEvent = events.isNotEmpty ? events.first['timestamp'] as DateTime? : null;
+
+              return Container(
+                margin: EdgeInsets.only(bottom: 8),
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.black.withOpacity(0.1)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                        // ... (yung FE Name at Branch Name, walang babaguhin dito)
+                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Expanded(
                                   child: Column(
@@ -1640,93 +1789,62 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
                                 ),
                               ],
                             ),
-                            SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                Column(
-                                  children: [
-                                    Icon(Icons.straighten, color: Colors.grey, size: 14),
-                                    Text(
-                                      'Distance',
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.bold
-                                      ),
-                                    ),
-                                    Text(
-                                      route['distance'],
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Column(
-                                  children: [
-                                    Icon(Icons.access_time, color: Colors.grey, size: 14),
-                                    Text(
-                                      'ETA',
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.bold
-                                      ),
-                                    ),
-                                    Text(
-                                      route['estimatedArrival'],
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Column(
-                                  children: [
-                                    Icon(Icons.attach_money, color: Colors.grey, size: 14),
-                                    Text(
-                                      'Fare',
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.bold
-                                      ),
-                                    ),
-                                    Text(
-                                      route['price'],
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                    SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        Column(
+                          children: [
+                            Icon(Icons.straighten, color: Colors.grey, size: 14),
+                            Text('Distance', style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
+                            Text(
+                              route['distance'] ?? '...',
+                              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
                             ),
-                            SizedBox(height: 18),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(Icons.play_arrow, color: Colors.white70, size: 14),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'Started: ${route['startTime']}',
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                ElevatedButton(
+                          ],
+                        ),
+                        Column(
+                          children: [
+                            Icon(Icons.access_time, color: Colors.grey, size: 14),
+                            Text('ETA', style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
+                            Text(
+                              // --- ITO ANG BINAGO PARA SA ETA ---
+                              route['estimatedArrival'] != null
+                                  ? DateFormat('hh:mm a').format(route['estimatedArrival'] as DateTime)
+                                  : '...',
+                              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                        Column(
+                          children: [
+                            Icon(Icons.attach_money, color: Colors.grey, size: 14),
+                            Text('Fare', style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
+                            Text(
+                              route['price'] ?? '...',
+                              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 18),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.play_arrow, color: Colors.white70, size: 14),
+                            SizedBox(width: 4),
+                            Text(
+                              // --- ITO ANG BINAGO PARA SA START TIME ---
+                              'Started: ${startTimeEvent != null ? DateFormat('hh:mm a').format(startTimeEvent) : '...'}',
+                              style: TextStyle(color: Colors.grey, fontSize: 10),
+                            ),
+                          ],
+                        ),
+                        // ... (yung stop button mo, walang babaguhin dito)
+                        ElevatedButton(
                                   onPressed: () => stopNavigation(route),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.red,
@@ -1748,17 +1866,17 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
                                     ],
                                   ),
                                 ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
-        ],
-      ),
-    );
-  }
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+      ],
+    ),
+  );
+}
   Widget _buildBranchIconWidget() {
   return Container(
     width: 40,
@@ -1970,4 +2088,246 @@ Widget _buildServiceRequestCard(Map<String, dynamic> request) {
       
     );
   }
+
+
+  // 3 pill buttons at the top of the bottom sheet
+  Widget _buildPillButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _buildPillButton('All'),
+        _buildPillButton('Active'),
+        _buildPillButton('Completed'),
+      ],
+    );
+  }
+
+  Widget _buildPillButton(String label) {
+    return GestureDetector(
+      onTap: () {
+        // Handle pill button tap
+      },
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12.0),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 4.0,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+
+  //Widget for FE's profile picture, name, Current location, and time
+ Widget _buildFieldEngineerProfile() {
+  return Padding(
+    padding: const EdgeInsets.all(15.0),
+    child: Row(
+      children: [
+        Column(
+          children: [
+            CircleAvatar(
+              radius: 40,
+              backgroundImage: AssetImage('assets/profile.jpg'),
+            ),
+            // SizedBox(height: 8),
+            // Text(
+            //   'Battery: $_batteryLevel%',
+            //   style: TextStyle(fontSize: 12, color: Colors.black),
+            // ),
+          ],
+        ),
+        SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.fieldEngineer['name'] ?? 'Field Engineer',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
+            ),
+            SizedBox(height: 4),
+            FutureBuilder<String>(
+              future: _getAddressFromCoordinates(
+                widget.fieldEngineer['currentLatitude']?.toDouble() ?? 0.0,
+                widget.fieldEngineer['currentLongitude']?.toDouble() ?? 0.0,
+              ),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Row(
+                    children: [
+                      Icon(Icons.location_on, color: Colors.black, size: 14),
+                      SizedBox(width: 4),
+                      Text(
+                        "Fetching address...",
+                        style: TextStyle(color: Colors.black, fontSize: 12),
+                      ),
+                    ],
+                  );
+                } else if (snapshot.hasError) {
+                  return Text(
+                    "Error fetching address",
+                    style: TextStyle(color: Colors.red, fontSize: 12),
+                  );
+                } else {
+                  return Text(
+                    snapshot.data ?? "Address not found",
+                    style: TextStyle(color: Colors.black, fontSize: 12),
+                  );
+                }
+              },
+            ),
+            Row(
+              children: [
+                Icon(Icons.access_time, color: Colors.black, size: 14),
+                SizedBox(width: 4),
+                Text(
+                  'Since ${DateFormat('hh:mm a').format(DateTime.now())}',
+                  style: TextStyle(color: Colors.black, fontSize: 12),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+//Service request timeline widget
+// home_screen.dart
+
+Widget _buildServiceRequestTimeline(Map<String, dynamic> route) {
+  final events = route['events'] as List<Map<String, dynamic>>;
+  final status = route['status'];
+
+  // Listahan ng lahat ng posibleng steps
+  final allSteps = ['Accepted', 'In Transit', 'Arrived', 'Finished Service', 'Left Branch'];
+
+  // Function para kunin ang event data kung tapos na
+  Map<String, dynamic>? findEvent(String status) {
+    try {
+      return events.firstWhere((e) => e['status'] == status);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  return Container(
+    margin: EdgeInsets.all(12.0),
+    padding: EdgeInsets.all(16.0),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Activity for ${route['branchName']}',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
+        ),
+        SizedBox(height: 20),
+        Timeline.tileBuilder(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          theme: TimelineThemeData(
+            nodePosition: 0,
+            connectorTheme: ConnectorThemeData(thickness: 2.0),
+            indicatorTheme: IndicatorThemeData(size: 20.0),
+          ),
+          builder: TimelineTileBuilder.connected(
+            itemCount: allSteps.length,
+            connectionDirection: ConnectionDirection.before,
+            contentsBuilder: (context, index) {
+              final stepStatus = allSteps[index];
+              final event = findEvent(stepStatus);
+
+              return Padding(
+                padding: const EdgeInsets.only(left: 12.0, bottom: 20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      stepStatus,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: event != null ? Colors.black : Colors.grey,
+                      ),
+                    ),
+                    if (event != null)
+                      Text(
+                        DateFormat('hh:mm a').format(event['timestamp']),
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                  ],
+                ),
+              );
+            },
+            indicatorBuilder: (context, index) {
+              final event = findEvent(allSteps[index]);
+              final isCurrent = allSteps[index] == 'In Transit' && status == 'in-transit' ||
+                                allSteps[index] == 'Arrived' && status == 'arrived';
+
+              if (event != null) {
+                if(isCurrent){
+                   return DotIndicator(color: Colors.blue,);
+                }
+                return DotIndicator(color: Colors.green, child: Icon(Icons.check, color: Colors.white, size: 12));
+              } else {
+                return OutlinedDotIndicator(color: Colors.grey.shade300, borderWidth: 2);
+              }
+            },
+            connectorBuilder: (context, index, type) {
+              // Kulayan ang connector kung tapos na ang naunang step
+              if (index > 0) {
+                final prevEvent = findEvent(allSteps[index - 1]);
+                if (prevEvent != null) {
+                  return SolidLineConnector(color: Colors.green);
+                }
+              }
+              return SolidLineConnector(color: Colors.grey.shade300);
+            },
+          ),
+        ),
+        // --- MGA BUTTONS (walang pagbabago dito) ---
+        if (status == 'arrived')
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _finishService(route),
+              icon: Icon(Icons.check_circle_outline),
+              label: Text('Mark as Finished'),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green, foregroundColor: Colors.white),
+            ),
+          ),
+        if (status == 'finished')
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _leaveBranch(route),
+              icon: Icon(Icons.directions_walk),
+              label: Text('Leave Branch'),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange, foregroundColor: Colors.white),
+            ),
+          ),
+      ],
+    ),
+  );
+}
 }
