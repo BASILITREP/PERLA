@@ -13,19 +13,25 @@ import 'package:http/http.dart' as http;
 import 'dart:ui' as ui;
 import 'package:geolocator/geolocator.dart' as geolocator;
 import '../services/location_service.dart';
-import 'dart:async'; 
-import 'package:location/location.dart'; 
-import 'package:url_launcher/url_launcher.dart'; 
-import 'dart:io' show Platform; 
+import 'dart:async';
+import 'package:location/location.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'dart:io' show Platform;
 import 'package:intl/intl.dart';
 import 'package:geocoding/geocoding.dart' as geocoding;
 import 'package:battery_plus/battery_plus.dart';
 import 'package:timelines_plus/timelines_plus.dart';
-
-
+import 'package:app_app_test/widgets/service_request_timeline.dart';
+import 'package:app_app_test/widgets/field_engineer_profile.dart';
+import 'package:app_app_test/widgets/service_request_list.dart';
+import 'package:app_app_test/widgets/ongoing_routes_panel.dart';
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title, required this.fieldEngineer});
+  const MyHomePage({
+    super.key,
+    required this.title,
+    required this.fieldEngineer,
+  });
 
   final String title;
   final Map<String, dynamic> fieldEngineer;
@@ -54,7 +60,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // FCM and Local Notifications
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
-  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
 
   @override
   void initState() {
@@ -63,40 +70,50 @@ class _MyHomePageState extends State<MyHomePage> {
     fetchServiceRequests();
     fetchBranches();
     // Initialize and start the location service
-    _locationService = LocationService(fieldEngineerId: widget.fieldEngineer['id']);
+    _locationService = LocationService(
+      fieldEngineerId: widget.fieldEngineer['id'],
+    );
     _locationService.start();
     _checkForActiveAssignmentOnStartup();
     _fetchBatteryLevel();
 
-      
-
-    _locationStreamSubscription = _locationService.onLocationChanged.listen((LocationData newLocation) {
+    _locationStreamSubscription = _locationService.onLocationChanged.listen((
+      LocationData newLocation,
+    ) {
       // This will be called every time the GPS reports a new position
       _updateFeMarkerOnMap(newLocation);
-      if (_isNavigationMode && _mapboxController != null && newLocation.latitude != null && newLocation.longitude != null) {
-    _mapboxController!.flyTo(
-      CameraOptions(
-        center: Point(coordinates: Position(newLocation.longitude!, newLocation.latitude!)),
-        zoom: 16.0, // Zoom in closer for navigation
-        bearing: newLocation.heading, // Orient the map to the direction of travel
-        pitch: 60.0, // Tilt the map for a 3D perspective
-      ),
-      MapAnimationOptions(duration: 1500), // Animate the camera movement
-    );
-  }
-    });
-
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-    _captureIconAsBytes().then((bytes) {
-      if (bytes != null) {
-        setState(() {
-          _branchIconBytes = bytes;
-          print("✅ Branch icon captured successfully!");
-        });
+      if (_isNavigationMode &&
+          _mapboxController != null &&
+          newLocation.latitude != null &&
+          newLocation.longitude != null) {
+        _mapboxController!.flyTo(
+          CameraOptions(
+            center: Point(
+              coordinates: Position(
+                newLocation.longitude!,
+                newLocation.latitude!,
+              ),
+            ),
+            zoom: 16.0, // Zoom in closer for navigation
+            bearing: newLocation
+                .heading, // Orient the map to the direction of travel
+            pitch: 60.0, // Tilt the map for a 3D perspective
+          ),
+          MapAnimationOptions(duration: 1500), // Animate the camera movement
+        );
       }
     });
-  });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _captureIconAsBytes().then((bytes) {
+        if (bytes != null) {
+          setState(() {
+            _branchIconBytes = bytes;
+            print("✅ Branch icon captured successfully!");
+          });
+        }
+      });
+    });
   }
 
   @override
@@ -107,41 +124,46 @@ class _MyHomePageState extends State<MyHomePage> {
     super.dispose();
   }
 
-  Future<void> _fetchBatteryLevel() async{
-    try{
+  Future<void> _fetchBatteryLevel() async {
+    try {
       final int batteryLevel = await _battery.batteryLevel;
       setState(() {
         _batteryLevel = batteryLevel;
       });
-    } catch(e){
+    } catch (e) {
       print("Error fetching battery level: $e");
-       
-      
     }
   }
 
   Future<void> _updateFeMarkerOnMap(LocationData locationData) async {
-    if (_mapboxController == null || locationData.latitude == null || locationData.longitude == null) {
+    if (_mapboxController == null ||
+        locationData.latitude == null ||
+        locationData.longitude == null) {
       return;
     }
-    
+
     // This is much more efficient than removing and re-adding the layer.
     // We update the data of the existing GeoJSON source.
     try {
       final source = await _mapboxController!.style.getSource("circle-source");
       if (source is GeoJsonSource) {
-        source.updateGeoJSON(json.encode({
-          "type": "FeatureCollection",
-          "features": [
-            {
-              "type": "Feature",
-              "geometry": {
-                "type": "Point",
-                "coordinates": [locationData.longitude, locationData.latitude]
+        source.updateGeoJSON(
+          json.encode({
+            "type": "FeatureCollection",
+            "features": [
+              {
+                "type": "Feature",
+                "geometry": {
+                  "type": "Point",
+                  "coordinates": [
+                    locationData.longitude,
+                    locationData.latitude,
+                  ],
+                },
               },
-            }
-          ]
-        }));
+            ],
+          }),
+        );
       }
     } catch (e) {
       print("Error updating FE marker: $e");
@@ -149,310 +171,285 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _launchGoogleMapsNavigation(double lat, double lng) async {
-  Uri uri;
+    Uri uri;
 
-  if (Platform.isAndroid) {
-    //  Android
-    uri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
-  } else if (Platform.isIOS) {
-    // iOS
-    Uri googleMapsUri = Uri.parse('comgooglemaps://?daddr=$lat,$lng&directionsmode=driving');
-    if (await canLaunchUrl(googleMapsUri)) {
-      uri = googleMapsUri;
+    if (Platform.isAndroid) {
+      //  Android
+      uri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    } else if (Platform.isIOS) {
+      // iOS
+      Uri googleMapsUri = Uri.parse(
+        'comgooglemaps://?daddr=$lat,$lng&directionsmode=driving',
+      );
+      if (await canLaunchUrl(googleMapsUri)) {
+        uri = googleMapsUri;
+      } else {
+        uri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+        );
+      }
     } else {
-    
-      uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+      uri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+      );
     }
-  } else {
-    
-     uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+
+    try {
+      await launchUrl(uri);
+    } catch (e) {
+      print('Could not launch $uri: $e');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not open maps')));
+    }
   }
 
-  try {
-    await launchUrl(uri);
-  } catch (e) {
-    print('Could not launch $uri: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Could not open maps')),
-    );
-  }
-}
-
-//address
-Future<String> _getAddressFromCoordinates(double latitude, double longitude) async {
-  try {
-    List<geocoding.Placemark> placemarks = await geocoding.placemarkFromCoordinates(latitude, longitude);
-    if (placemarks.isNotEmpty) {
-      geocoding.Placemark place = placemarks.first;
-      return "${place.street}, ${place.locality}";
+  //address
+  Future<String> _getAddressFromCoordinates(
+    double latitude,
+    double longitude,
+  ) async {
+    try {
+      List<geocoding.Placemark> placemarks = await geocoding
+          .placemarkFromCoordinates(latitude, longitude);
+      if (placemarks.isNotEmpty) {
+        geocoding.Placemark place = placemarks.first;
+        return "${place.street}, ${place.locality}";
+      }
+      return "Address not found";
+    } catch (e) {
+      print("Error getting address: $e");
+      return "Error getting address";
     }
-    return "Address not found";
-  } catch (e) {
-    print("Error getting address: $e");
-    return "Error getting address";
   }
-}
 
   //branch marker
   Future<void> _addBranchMarkers(List<dynamic> branches) async {
-  if (_mapboxController == null || branches.isEmpty || _branchIconBytes == null) {
-    print("Cannot add branch markers. Controller, branches, or icon bytes are missing.");
-    return;
+    if (_mapboxController == null ||
+        branches.isEmpty ||
+        _branchIconBytes == null) {
+      print(
+        "Cannot add branch markers. Controller, branches, or icon bytes are missing.",
+      );
+      return;
+    }
+
+    const String branchIconId = "bank-marker-icon";
+
+    try {
+      // Check if the layer exists before removing it
+      final layerExists = await _mapboxController!.style.styleLayerExists(
+        "branch-layer",
+      );
+      if (layerExists) {
+        await _mapboxController!.style.removeStyleLayer("branch-layer");
+      }
+
+      // Check if the source exists before removing it
+      final sourceExists = await _mapboxController!.style.styleSourceExists(
+        "branch-source",
+      );
+      if (sourceExists) {
+        await _mapboxController!.style.removeStyleSource("branch-source");
+      }
+
+      // Remove the style image if it exists
+      final imageExists = await _mapboxController!.style.hasStyleImage(
+        branchIconId,
+      );
+      if (imageExists) {
+        await _mapboxController!.style.removeStyleImage(branchIconId);
+      }
+
+      // Add the captured image bytes to the map's style
+      await _mapboxController!.style.addStyleImage(
+        branchIconId,
+        3.0, // Match the pixelRatio from the capture method
+        MbxImage(
+          width: 40 * 3, // width * pixelRatio
+          height: 40 * 3, // height * pixelRatio
+          data: _branchIconBytes!,
+        ),
+        false, // sdf (Signed Distance Field)
+        [], // stretchX: Add this empty list
+        [], // stretchY: Add this empty list
+        null, // content: Add this null value
+      );
+
+      // Create GeoJSON features for the branches
+      final List<Map<String, dynamic>> features = branches.map((branch) {
+        return {
+          "type": "Feature",
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              branch['longitude'].toDouble(),
+              branch['latitude'].toDouble(),
+            ],
+          },
+          "properties": {"id": branch['id']},
+        };
+      }).toList();
+
+      // Add the GeoJSON source for the branch markers
+      await _mapboxController!.style.addSource(
+        GeoJsonSource(
+          id: "branch-source",
+          data: json.encode({
+            "type": "FeatureCollection",
+            "features": features,
+          }),
+        ),
+      );
+
+      // Add the symbol layer for the branch markers
+      await _mapboxController!.style.addLayer(
+        SymbolLayer(
+          id: "branch-layer",
+          sourceId: "branch-source",
+          iconImage: branchIconId,
+          iconSize: 0.60, // Adjust size to compensate for pixelRatio
+          iconAllowOverlap: true,
+        ),
+      );
+
+      print("📍 Branch markers added to the map.");
+    } catch (e) {
+      print("Error adding branch markers: $e");
+    }
   }
 
-  const String branchIconId = "bank-marker-icon";
+  //check proximity
+  void _startProximityCheck(Map<String, dynamic> route, dynamic branch) {
+    _proximityCheckTimer?.cancel(); // Cancel any previous timer
 
-  try {
-    // Check if the layer exists before removing it
-    final layerExists = await _mapboxController!.style.styleLayerExists("branch-layer");
-    if (layerExists) {
-      await _mapboxController!.style.removeStyleLayer("branch-layer");
-    }
+    _proximityCheckTimer = Timer.periodic(const Duration(seconds: 5), (
+      timer,
+    ) async {
+      final location = Location();
+      final currentLocation = await location.getLocation();
 
-    // Check if the source exists before removing it
-    final sourceExists = await _mapboxController!.style.styleSourceExists("branch-source");
-    if (sourceExists) {
-      await _mapboxController!.style.removeStyleSource("branch-source");
-    }
+      if (currentLocation.latitude == null || currentLocation.longitude == null)
+        return;
 
-    // Remove the style image if it exists
-    final imageExists = await _mapboxController!.style.hasStyleImage(branchIconId);
-    if (imageExists) {
-      await _mapboxController!.style.removeStyleImage(branchIconId);
-    }
+      double distanceInMeters = geolocator.Geolocator.distanceBetween(
+        currentLocation.latitude!,
+        currentLocation.longitude!,
+        branch['latitude'].toDouble(),
+        branch['longitude'].toDouble(),
+      );
 
-    // Add the captured image bytes to the map's style
-    await _mapboxController!.style.addStyleImage(
-      branchIconId,
-      3.0, // Match the pixelRatio from the capture method
-      MbxImage(
-        width: 40 * 3, // width * pixelRatio
-        height: 40 * 3, // height * pixelRatio
-        data: _branchIconBytes!,
-      ),
-      false, // sdf (Signed Distance Field)
-      [],    // stretchX: Add this empty list
-      [],    // stretchY: Add this empty list
-      null,  // content: Add this null value
-    );
+      print(
+        '📏 Distance to destination: ${distanceInMeters.toStringAsFixed(2)} meters.',
+      );
 
-    // Create GeoJSON features for the branches
-    final List<Map<String, dynamic>> features = branches.map((branch) {
-      return {
-        "type": "Feature",
-        "geometry": {
-          "type": "Point",
-          "coordinates": [
-            branch['longitude'].toDouble(),
-            branch['latitude'].toDouble(),
-          ]
-        },
-        "properties": {"id": branch['id']}
-      };
-    }).toList();
-
-    // Add the GeoJSON source for the branch markers
-    await _mapboxController!.style.addSource(
-      GeoJsonSource(
-        id: "branch-source",
-        data: json.encode({
-          "type": "FeatureCollection",
-          "features": features,
-        }),
-      ),
-    );
-
-    // Add the symbol layer for the branch markers
-    await _mapboxController!.style.addLayer(
-      SymbolLayer(
-        id: "branch-layer",
-        sourceId: "branch-source",
-        iconImage: branchIconId,
-        iconSize: 0.60, // Adjust size to compensate for pixelRatio
-        iconAllowOverlap: true,
-      ),
-    );
-
-    print("📍 Branch markers added to the map.");
-  } catch (e) {
-    print("Error adding branch markers: $e");
-  }
-}
-
-//check proximity
-void _startProximityCheck(Map<String, dynamic> route, dynamic branch) {
-  _proximityCheckTimer?.cancel(); // Cancel any previous timer
-
-  _proximityCheckTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
-    final location = Location();
-    final currentLocation = await location.getLocation();
-    
-    if (currentLocation.latitude == null || currentLocation.longitude == null) return;
-
-    double distanceInMeters = geolocator.Geolocator.distanceBetween(
-      currentLocation.latitude!,
-      currentLocation.longitude!,
-      branch['latitude'].toDouble(),
-      branch['longitude'].toDouble(),
-    );
-
-    print('📏 Distance to destination: ${distanceInMeters.toStringAsFixed(2)} meters.');
-
-    if (distanceInMeters <= 5.0) {
-      print('🎉 Route complete! FE is within 5 meters of the branch.');
-      _completeRoute(route);
-      timer.cancel(); // Stop checking once the destination is reached
-    }
-  });
-}
-
-void _stopNavigationMode() {
-  setState(() {
-    _isNavigationMode = false;
-    _activeNavigationRoute = null;
-  });
-  _proximityCheckTimer?.cancel(); // Stop checking distance
-
-  // Optional: Reset camera to a default view
-  if (_mapboxController != null) {
-    _mapboxController!.flyTo(
-      CameraOptions(
-        center: Point(coordinates: Position(
-          widget.fieldEngineer['currentLongitude'].toDouble(),
-          widget.fieldEngineer['currentLatitude'].toDouble(),
-        )), // Default center
-        zoom: 12.0,
-        bearing: 0,
-        pitch: 0,
-      ),
-      MapAnimationOptions(duration: 1000),
-    );
-  }
-}
-
-void _completeRoute(Map<String, dynamic> route) async {
-  // Hanapin ang active route sa ating listahan
-  int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
-  if (routeIndex != -1) {
-    setState(() {
-      // I-update ang status at magdagdag ng bagong event
-      ongoingRoutes[routeIndex]['status'] = 'arrived';
-      ongoingRoutes[routeIndex]['events'].add({
-        'status': 'Arrived',
-        'timestamp': DateTime.now(),
-      });
+      if (distanceInMeters <= 5.0) {
+        print('🎉 Route complete! FE is within 5 meters of the branch.');
+        _completeRoute(route);
+        timer.cancel(); // Stop checking once the destination is reached
+      }
     });
   }
 
-  // Hindi na natin tatanggalin ang route sa listahan dito.
-  // Mananatili ito hanggang matapos ang serbisyo.
-  _proximityCheckTimer?.cancel(); // Itigil ang proximity check
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text('✅ You have arrived at ${route['branchName']}!'),
-      backgroundColor: Colors.green,
-    ),
-  );
-  
-  // Hindi na kailangan i-call ang stopHistoryBatching at stopNavigationMode dito
-}
-
-
-//complete route
-// void _completeRoute(Map<String, dynamic> route) async {
-//   final int serviceRequestId = route['serviceRequestId'];
-
-//   int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
-//   if (routeIndex != -1) {
-//     setState(() {
-//       // I-update ang status at magdagdag ng bagong event
-//       ongoingRoutes[routeIndex]['status'] = 'arrived';
-//       ongoingRoutes[routeIndex]['events'].add({
-//         'status': 'Arrived',
-//         'timestamp': DateTime.now(),
-//       });
-//     });
-//   }
-
-//   // Hindi na natin tatanggalin ang route sa listahan dito.
-//   // Mananatili ito hanggang matapos ang serbisyo.
-//   _proximityCheckTimer?.cancel(); // Itigil ang proximity check
-
-//   ScaffoldMessenger.of(context).showSnackBar(
-//     SnackBar(
-//       content: Text('✅ You have arrived at ${route['branchName']}!'),
-//       backgroundColor: Colors.green,
-//     ),
-//   );
-
-
-//   setState(() {
-//     ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
-//   });
-
-//   try{
-//     final url = Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/complete');
-//     final response = await http.post(url);
-
-//     if (response.statusCode == 200){
-//       print("✅ Service request marked as complete.");
-
-//     }else{
-//       print("❌ Failed to mark service request as complete. Status: ${response.statusCode}");
-//     }
-//   } catch(e){
-//     print("❌ Error marking service request as complete: $e");
-//   }
-  
-// }
-
-//finish service
-void _finishService(Map<String, dynamic> route){
-  int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
-  if (routeIndex != -1){
+  void _stopNavigationMode() {
     setState(() {
-      ongoingRoutes[routeIndex]['status'] = 'finished';
-      ongoingRoutes[routeIndex]['events'].add({
-        'status': 'Finished',
-        'timestamp': DateTime.now(),
-      });
+      _isNavigationMode = false;
+      _activeNavigationRoute = null;
     });
-    // Dito mo pwedeng i-call yung API para i-update ang backend na tapos na ang serbisyo
-    _proximityCheckTimer?.cancel();
+    _proximityCheckTimer?.cancel(); // Stop checking distance
+
+    // Optional: Reset camera to a default view
+    if (_mapboxController != null) {
+      _mapboxController!.flyTo(
+        CameraOptions(
+          center: Point(
+            coordinates: Position(
+              widget.fieldEngineer['currentLongitude'].toDouble(),
+              widget.fieldEngineer['currentLatitude'].toDouble(),
+            ),
+          ), // Default center
+          zoom: 12.0,
+          bearing: 0,
+          pitch: 0,
+        ),
+        MapAnimationOptions(duration: 1000),
+      );
+    }
+  }
+
+  void _completeRoute(Map<String, dynamic> route) async {
+    // Hanapin ang active route sa ating listahan
+    int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
+    if (routeIndex != -1) {
+      setState(() {
+        // I-update ang status at magdagdag ng bagong event
+        ongoingRoutes[routeIndex]['status'] = 'arrived';
+        ongoingRoutes[routeIndex]['events'].add({
+          'status': 'Arrived',
+          'timestamp': DateTime.now(),
+        });
+      });
+    }
+
+    // Hindi na natin tatanggalin ang route sa listahan dito.
+    // Mananatili ito hanggang matapos ang serbisyo.
+    _proximityCheckTimer?.cancel(); // Itigil ang proximity check
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('✅ Service at ${route['branchName']} marked as finished.'),
+        content: Text('✅ You have arrived at ${route['branchName']}!'),
         backgroundColor: Colors.green,
       ),
     );
-    
   }
-}
 
-//leave branch
-void _leaveBranch(Map<String, dynamic> route) {
-  int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
-  if (routeIndex != -1) {
-    setState(() {
-      ongoingRoutes[routeIndex]['status'] = 'left';
-      ongoingRoutes[routeIndex]['events'].add({
-        'status': 'Left Branch',
-        'timestamp': DateTime.now(),
-      });
-      // Pagka-leave, pwede na nating tanggalin sa active routes after a delay
-      Future.delayed(Duration(seconds: 5), () {
-        setState(() {
-          ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
+  //finish service
+  void _finishService(Map<String, dynamic> route) {
+    int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
+    if (routeIndex != -1) {
+      setState(() {
+        ongoingRoutes[routeIndex]['status'] = 'finished';
+        ongoingRoutes[routeIndex]['events'].add({
+          'status': 'Finished',
+          'timestamp': DateTime.now(),
         });
-        _locationService.stopHistoryBatching();
-        fetchServiceRequests();
       });
-    });
+      // Dito mo pwedeng i-call yung API para i-update ang backend na tapos na ang serbisyo
+      _proximityCheckTimer?.cancel();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '✅ Service at ${route['branchName']} marked as finished.',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
-}
 
- //draw polyline
+  //leave branch
+  void _leaveBranch(Map<String, dynamic> route) {
+    int routeIndex = ongoingRoutes.indexWhere((r) => r['id'] == route['id']);
+    if (routeIndex != -1) {
+      setState(() {
+        ongoingRoutes[routeIndex]['status'] = 'left';
+        ongoingRoutes[routeIndex]['events'].add({
+          'status': 'Left Branch',
+          'timestamp': DateTime.now(),
+        });
+        // Pagka-leave, pwede na nating tanggalin sa active routes after a delay
+        Future.delayed(Duration(seconds: 5), () {
+          setState(() {
+            ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
+          });
+          _locationService.stopHistoryBatching();
+          fetchServiceRequests();
+        });
+      });
+    }
+  }
+
+  //draw polyline
   Future<void> _drawRouteOnMap(List<dynamic> coordinates) async {
     if (_mapboxController == null) return;
 
@@ -461,25 +458,35 @@ void _leaveBranch(Map<String, dynamic> route) {
 
     try {
       // Clear any existing route first
-      final layerExists = await _mapboxController!.style.styleLayerExists(routeLayerId);
-      if (layerExists) await _mapboxController!.style.removeStyleLayer(routeLayerId);
-      final sourceExists = await _mapboxController!.style.styleSourceExists(routeSourceId);
-      if (sourceExists) await _mapboxController!.style.removeStyleSource(routeSourceId);
-      
+      final layerExists = await _mapboxController!.style.styleLayerExists(
+        routeLayerId,
+      );
+      if (layerExists)
+        await _mapboxController!.style.removeStyleLayer(routeLayerId);
+      final sourceExists = await _mapboxController!.style.styleSourceExists(
+        routeSourceId,
+      );
+      if (sourceExists)
+        await _mapboxController!.style.removeStyleSource(routeSourceId);
+
       final Map<String, dynamic> routeGeoJson = {
         "type": "Feature",
-        "geometry": {"type": "LineString", "coordinates": coordinates}
+        "geometry": {"type": "LineString", "coordinates": coordinates},
       };
 
-      await _mapboxController!.style.addSource(GeoJsonSource(id: routeSourceId, data: json.encode(routeGeoJson)));
+      await _mapboxController!.style.addSource(
+        GeoJsonSource(id: routeSourceId, data: json.encode(routeGeoJson)),
+      );
 
-      await _mapboxController!.style.addLayer(LineLayer(
-        id: routeLayerId,
-        sourceId: routeSourceId,
-        lineColor: Colors.blue.value,
-        lineWidth: 5.0,
-        lineOpacity: 0.8,
-      ));
+      await _mapboxController!.style.addLayer(
+        LineLayer(
+          id: routeLayerId,
+          sourceId: routeSourceId,
+          lineColor: Colors.blue.value,
+          lineWidth: 5.0,
+          lineOpacity: 0.8,
+        ),
+      );
       print('✅ Route polyline drawn on map.');
     } catch (e) {
       print('❌ Error drawing route: $e');
@@ -487,108 +494,122 @@ void _leaveBranch(Map<String, dynamic> route) {
   }
 
   Future<Uint8List?> _captureIconAsBytes() async {
-  try {
-    RenderRepaintBoundary boundary = _branchIconKey.currentContext?.findRenderObject() as RenderRepaintBoundary;
-    
-    // The devicePixelRatio ensures the image is sharp on high-res screens.
-    ui.Image image = await boundary.toImage(pixelRatio: 3.0); 
-    
-    ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    
-    return byteData?.buffer.asUint8List();
-  } catch (e) {
-    print("Error capturing widget: $e");
-    return null;
-  }
-}
- 
+    try {
+      RenderRepaintBoundary boundary =
+          _branchIconKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary;
 
- /// circle marker 
-Future<void> _addCircleMarker(Position coordinates) async {
-  if (_mapboxController == null) return;
+      // The devicePixelRatio ensures the image is sharp on high-res screens.
+      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
 
-  try {
-    // Check if the layer exists before removing it
-    final layerExists = await _mapboxController!.style.styleLayerExists("circle-layer");
-    if (layerExists) {
-      await _mapboxController!.style.removeStyleLayer("circle-layer");
+      ByteData? byteData = await image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+
+      return byteData?.buffer.asUint8List();
+    } catch (e) {
+      print("Error capturing widget: $e");
+      return null;
     }
-
-    // Check if the source exists before removing it
-    final sourceExists = await _mapboxController!.style.styleSourceExists("circle-source");
-    if (sourceExists) {
-      await _mapboxController!.style.removeStyleSource("circle-source");
-    }
-
-    // Add the GeoJSON source
-    await _mapboxController!.style.addSource(
-      GeoJsonSource(
-        id: "circle-source",
-        data: json.encode({
-          "type": "FeatureCollection",
-          "features": [
-            {
-              "type": "Feature",
-              "geometry": {
-                "type": "Point",
-                "coordinates": [coordinates.lng, coordinates.lat]
-              },
-              "properties": {}
-            }
-          ]
-        }),
-      ),
-    );
-
-    // Add the circle layer
-    await _mapboxController!.style.addLayer(
-      CircleLayer(
-        id: "circle-layer",
-        sourceId: "circle-source",
-        circleColor: Colors.blue.value,
-        circleRadius: 8.0,
-        circleStrokeColor: Colors.white.value,
-        circleStrokeWidth: 2.0,
-      ),
-    );
-  } catch (e) {
-    print('Error adding circle marker: $e');
   }
-}
 
-Future<void> _checkForActiveAssignmentOnStartup() async {
-  try {
-    final response = await http.get(
-      Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/FieldEngineer/${widget.fieldEngineer['id']}/current-assignment'),
-    );
+  /// circle marker
+  Future<void> _addCircleMarker(Position coordinates) async {
+    if (_mapboxController == null) return;
 
-    if (response.statusCode == 200 && response.body.isNotEmpty && response.body != "null") {
-      final assignment = json.decode(response.body);
-      if (assignment != null) {
-        print("✅ Found active assignment on startup. Resuming activity logging.");
-        _locationService.startHistoryBatching();
-        // Optional: You could also automatically put the user back into navigation mode here
-      } else {
-        print("ℹ️ No active assignment found on startup.");
+    try {
+      // Check if the layer exists before removing it
+      final layerExists = await _mapboxController!.style.styleLayerExists(
+        "circle-layer",
+      );
+      if (layerExists) {
+        await _mapboxController!.style.removeStyleLayer("circle-layer");
       }
+
+      // Check if the source exists before removing it
+      final sourceExists = await _mapboxController!.style.styleSourceExists(
+        "circle-source",
+      );
+      if (sourceExists) {
+        await _mapboxController!.style.removeStyleSource("circle-source");
+      }
+
+      // Add the GeoJSON source
+      await _mapboxController!.style.addSource(
+        GeoJsonSource(
+          id: "circle-source",
+          data: json.encode({
+            "type": "FeatureCollection",
+            "features": [
+              {
+                "type": "Feature",
+                "geometry": {
+                  "type": "Point",
+                  "coordinates": [coordinates.lng, coordinates.lat],
+                },
+                "properties": {},
+              },
+            ],
+          }),
+        ),
+      );
+
+      // Add the circle layer
+      await _mapboxController!.style.addLayer(
+        CircleLayer(
+          id: "circle-layer",
+          sourceId: "circle-source",
+          circleColor: Colors.blue.value,
+          circleRadius: 8.0,
+          circleStrokeColor: Colors.white.value,
+          circleStrokeWidth: 2.0,
+        ),
+      );
+    } catch (e) {
+      print('Error adding circle marker: $e');
     }
-  } catch (e) {
-    print("Error checking for active assignment: $e");
   }
-}
+
+  Future<void> _checkForActiveAssignmentOnStartup() async {
+    try {
+      final response = await http.get(
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/FieldEngineer/${widget.fieldEngineer['id']}/current-assignment',
+        ),
+      );
+
+      if (response.statusCode == 200 &&
+          response.body.isNotEmpty &&
+          response.body != "null") {
+        final assignment = json.decode(response.body);
+        if (assignment != null) {
+          print(
+            "✅ Found active assignment on startup. Resuming activity logging.",
+          );
+          _locationService.startHistoryBatching();
+          // Optional: You could also automatically put the user back into navigation mode here
+        } else {
+          print("ℹ️ No active assignment found on startup.");
+        }
+      }
+    } catch (e) {
+      print("Error checking for active assignment: $e");
+    }
+  }
 
   Future<void> _initializeFCM() async {
     try {
       // Request permission for notifications
-      NotificationSettings settings = await _firebaseMessaging.requestPermission(
-        alert: true,
-        announcement: false,
-        badge: true,
-        carPlay: false,
-        criticalAlert: false,
-        provisional: false,
-        sound: true,
-      );
+      NotificationSettings settings = await _firebaseMessaging
+          .requestPermission(
+            alert: true,
+            announcement: false,
+            badge: true,
+            carPlay: false,
+            criticalAlert: false,
+            provisional: false,
+            sound: true,
+          );
 
       print('User granted permission: ${settings.authorizationStatus}');
 
@@ -596,9 +617,8 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
       const AndroidInitializationSettings initializationSettingsAndroid =
           AndroidInitializationSettings('@mipmap/ic_launcher');
 
-      const InitializationSettings initializationSettings = InitializationSettings(
-        android: initializationSettingsAndroid,
-      );
+      const InitializationSettings initializationSettings =
+          InitializationSettings(android: initializationSettingsAndroid);
 
       await _localNotifications.initialize(
         initializationSettings,
@@ -638,12 +658,12 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
       });
 
       // Handle notification tap when app is terminated
-      RemoteMessage? initialMessage = await _firebaseMessaging.getInitialMessage();
+      RemoteMessage? initialMessage = await _firebaseMessaging
+          .getInitialMessage();
       if (initialMessage != null) {
         print('App opened from terminated state: ${initialMessage.data}');
         _handleNotificationData(initialMessage.data);
       }
-
     } catch (e) {
       print('Error initializing FCM: $e');
     }
@@ -652,13 +672,11 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
   Future<void> _sendTokenToBackend() async {
     try {
       final response = await http.post(
-        Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/FieldEngineer/${widget.fieldEngineer['id']}/fcm-token'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({
-          'fcmToken': fcmToken,
-        }),
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/FieldEngineer/${widget.fieldEngineer['id']}/fcm-token',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'fcmToken': fcmToken}),
       );
 
       if (response.statusCode == 200) {
@@ -674,14 +692,14 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
   Future<void> _showLocalNotification(RemoteMessage message) async {
     const AndroidNotificationDetails androidPlatformChannelSpecifics =
         AndroidNotificationDetails(
-      'service_requests',
-      'Service Requests',
-      channelDescription: 'Notifications for new service requests',
-      importance: Importance.high,
-      priority: Priority.high,
-      showWhen: true,
-      icon: '@mipmap/ic_launcher',
-    );
+          'service_requests',
+          'Service Requests',
+          channelDescription: 'Notifications for new service requests',
+          importance: Importance.high,
+          priority: Priority.high,
+          showWhen: true,
+          icon: '@mipmap/ic_launcher',
+        );
 
     const NotificationDetails platformChannelSpecifics = NotificationDetails(
       android: androidPlatformChannelSpecifics,
@@ -710,14 +728,16 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
   void _handleNotificationData(Map<String, dynamic> data) {
     // Handle different types of notifications
     final type = data['type'];
-    
+
     switch (type) {
       case 'new_service_request':
         // Refresh service requests and show a snackbar
         fetchServiceRequests();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('New service request: ${data['branchName'] ?? 'Unknown location'}'),
+            content: Text(
+              'New service request: ${data['branchName'] ?? 'Unknown location'}',
+            ),
             backgroundColor: Colors.blue,
             action: SnackBarAction(
               label: 'View',
@@ -744,18 +764,18 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
 
     try {
       final response = await http.get(
-        Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests',
+        ),
+        headers: {'Content-Type': 'application/json'},
       );
 
       if (response.statusCode == 200) {
         List<dynamic> allRequests = json.decode(response.body);
-        
+
         List<dynamic> filteredRequests = allRequests.where((request) {
-          return request['fieldEngineerId'] == null || 
-                 request['fieldEngineerId'] == widget.fieldEngineer['id'];
+          return request['fieldEngineerId'] == null ||
+              request['fieldEngineerId'] == widget.fieldEngineer['id'];
         }).toList();
 
         setState(() {
@@ -779,10 +799,10 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
   Future<void> fetchBranches() async {
     try {
       final response = await http.get(
-        Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/Branches'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/Branches',
+        ),
+        headers: {'Content-Type': 'application/json'},
       );
 
       if (response.statusCode == 200) {
@@ -796,16 +816,25 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
     }
   }
 
-  Future<Map<String, dynamic>?> getMapboxRoute(double fromLat, double fromLng, double toLat, double toLng) async {
+  Future<Map<String, dynamic>?> getMapboxRoute(
+    double fromLat,
+    double fromLng,
+    double toLat,
+    double toLng,
+  ) async {
     try {
-      const String mapboxToken = 'pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q';
-      final String url = 'https://api.mapbox.com/directions/v5/mapbox/driving/$fromLng,$fromLat;$toLng,$toLat?steps=true&geometries=geojson&access_token=$mapboxToken';
-      
+      const String mapboxToken =
+          'pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q';
+      final String url =
+          'https://api.mapbox.com/directions/v5/mapbox/driving/$fromLng,$fromLat;$toLng,$toLat?steps=true&geometries=geojson&access_token=$mapboxToken';
+
       final response = await http.get(Uri.parse(url));
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data['code'] == 'Ok' && data['routes'] != null && data['routes'].isNotEmpty) {
+        if (data['code'] == 'Ok' &&
+            data['routes'] != null &&
+            data['routes'].isNotEmpty) {
           return data['routes'][0];
         }
       }
@@ -816,13 +845,17 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
     }
   }
 
-  Future<void> startFieldEngineerNavigation(int fieldEngineerId, String fieldEngineerName, List<dynamic> routeCoordinates) async {
+  Future<void> startFieldEngineerNavigation(
+    int fieldEngineerId,
+    String fieldEngineerName,
+    List<dynamic> routeCoordinates,
+  ) async {
     try {
       final response = await http.post(
-        Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/Test/startNavigation'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/Test/startNavigation',
+        ),
+        headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'fieldEngineerId': fieldEngineerId,
           'fieldEngineerName': fieldEngineerName,
@@ -846,10 +879,10 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
   Future<void> createNewRoute(Map<String, dynamic> routeData) async {
     try {
       final response = await http.post(
-        Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/Routes'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/Routes',
+        ),
+        headers: {'Content-Type': 'application/json'},
         body: json.encode(routeData),
       );
 
@@ -866,13 +899,16 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
     }
   }
 
-  Future<void> triggerWebAdminUpdate(int serviceRequestId, int fieldEngineerId) async {
+  Future<void> triggerWebAdminUpdate(
+    int serviceRequestId,
+    int fieldEngineerId,
+  ) async {
     try {
       final response = await http.post(
-        Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/Notifications/serviceRequestAccepted'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/Notifications/serviceRequestAccepted',
+        ),
+        headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'serviceRequestId': serviceRequestId,
           'fieldEngineerId': fieldEngineerId,
@@ -905,287 +941,142 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
   }
 
   Future<void> acceptServiceRequest(int serviceRequestId) async {
-  try {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 20),
-              Text('Accepting request...'),
-            ],
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 20),
+                Text('Accepting request...'),
+              ],
+            ),
+          );
+        },
+      );
+
+      final acceptResponse = await http.post(
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/accept',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'fieldEngineerId': widget.fieldEngineer['id']}),
+      );
+
+      if (acceptResponse.statusCode == 200) {
+        print('✅ Service request accepted by backend.');
+
+        final serviceRequest = serviceRequests.firstWhere(
+          (sr) => sr['id'] == serviceRequestId,
+          orElse: () => null,
+        );
+        if (serviceRequest == null)
+          throw Exception('Could not find local service request data.');
+
+        final branch = branches.firstWhere(
+          (b) => b['id'].toString() == serviceRequest['branchId'].toString(),
+          orElse: () => null,
+        );
+        if (branch == null)
+          throw Exception('Could not find local branch data.');
+
+        final routeData = await getMapboxRoute(
+          widget.fieldEngineer['currentLatitude'].toDouble(),
+          widget.fieldEngineer['currentLongitude'].toDouble(),
+          branch['latitude'].toDouble(),
+          branch['longitude'].toDouble(),
+        );
+        final newRouteForUI = {
+          'id': DateTime.now().millisecondsSinceEpoch,
+          'feId': widget.fieldEngineer['id'],
+          'feName': widget.fieldEngineer['name'],
+          'branchId': branch['id'],
+          'branchName': branch['name'],
+          'serviceRequestId': serviceRequestId,
+          'status': 'in-transit', // Initial status
+          'events': [
+            {'status': 'Accepted', 'timestamp': DateTime.now()},
+            {'status': 'In Transit', 'timestamp': DateTime.now()},
+          ],
+          // Magdagdag ng route details kung meron
+          if (routeData != null) ...{
+            'estimatedArrival': DateTime.now().add(
+              Duration(seconds: (routeData['duration'] as double).round()),
+            ),
+            'distance': formatDistance(routeData['distance'].toDouble()),
+            'price': calculateFare(routeData['distance'] / 1000),
+          },
+        };
+
+        setState(() {
+          ongoingRoutes.add(newRouteForUI);
+        });
+
+        _startProximityCheck(
+          newRouteForUI,
+          branch,
+        ); // Simulan ang pag-check kung malapit na
+        _locationService.startHistoryBatching();
+        _launchGoogleMapsNavigation(
+          branch['latitude'].toDouble(),
+          branch['longitude'].toDouble(),
+        );
+
+        Navigator.of(context).pop(); // Itago ang loading spinner
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Request accepted! Opening Google Maps...'),
+            backgroundColor: Colors.green,
           ),
         );
-      },
-    );
 
-    final acceptResponse = await http.post(
-      Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/accept'),
-      headers: { 'Content-Type': 'application/json' },
-      body: json.encode({ 'fieldEngineerId': widget.fieldEngineer['id'] }),
-    );
-
-    if (acceptResponse.statusCode == 200) {
-    print('✅ Service request accepted by backend.');
-
-    final serviceRequest = serviceRequests.firstWhere((sr) => sr['id'] == serviceRequestId, orElse: () => null);
-    if (serviceRequest == null) throw Exception('Could not find local service request data.');
-
-    final branch = branches.firstWhere((b) => b['id'].toString() == serviceRequest['branchId'].toString(), orElse: () => null);
-    if (branch == null) throw Exception('Could not find local branch data.');
-    
-    final routeData = await getMapboxRoute(
-      widget.fieldEngineer['currentLatitude'].toDouble(),
-      widget.fieldEngineer['currentLongitude'].toDouble(),
-      branch['latitude'].toDouble(),
-      branch['longitude'].toDouble(),
-    );
-
-    // --- BAGONG DATA STRUCTURE PARA SA TIMELINE ---
-    final newRouteForUI = {
-      'id': DateTime.now().millisecondsSinceEpoch,
-      'feId': widget.fieldEngineer['id'],
-      'feName': widget.fieldEngineer['name'],
-      'branchId': branch['id'],
-      'branchName': branch['name'],
-      'serviceRequestId': serviceRequestId,
-      'status': 'in-transit', // Initial status
-      'events': [ 
-        {
-          'status': 'Accepted',
-          'timestamp': DateTime.now(),
-        },
-        {
-          'status': 'In Transit',
-          'timestamp': DateTime.now(),
-        },
-      ],
-      // Magdagdag ng route details kung meron
-      if (routeData != null) ...{
-        'estimatedArrival': DateTime.now().add(Duration(seconds: (routeData['duration'] as double).round())),
-        'distance': formatDistance(routeData['distance'].toDouble()),
-        'price': calculateFare(routeData['distance'] / 1000),
+        fetchServiceRequests();
+      } else {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to accept request: ${acceptResponse.body}'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
-    };
-
-    setState(() {
-      ongoingRoutes.add(newRouteForUI);
-    });
-
-    _startProximityCheck(newRouteForUI, branch); // Simulan ang pag-check kung malapit na
-    _locationService.startHistoryBatching();
-    _launchGoogleMapsNavigation(branch['latitude'].toDouble(), branch['longitude'].toDouble());
-    
-    Navigator.of(context).pop(); // Itago ang loading spinner
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('✅ Request accepted! Opening Google Maps...'),
-        backgroundColor: Colors.green,
-      ),
-    );
-
-    fetchServiceRequests();
-  } else {
-      Navigator.of(context).pop(); 
+    } catch (e) {
+      if (Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+      print('❌ Error in acceptServiceRequest: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to accept request: ${acceptResponse.body}'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
     }
-  } catch (e) {
-    if (Navigator.canPop(context)) {
-      Navigator.of(context).pop();
-    }
-    print('❌ Error in acceptServiceRequest: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Error: $e'),
-        backgroundColor: Colors.red,
-      ),
-    );
   }
-}
-
-//   Future<void> acceptServiceRequest(int serviceRequestId) async {
-//     try {
-//       showDialog(
-//         context: context,
-//         barrierDismissible: false,
-//         builder: (BuildContext context) {
-//           return AlertDialog(
-//             content: Row(
-//               children: [
-//                 CircularProgressIndicator(),
-//                 SizedBox(width: 20),
-//                 Text('Accepting request...'),
-//               ],
-//             ),
-//           );
-//         },
-//       );
-
-//       final acceptResponse = await http.post(
-//         Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/ServiceRequests/$serviceRequestId/accept'),
-//         headers: {
-//           'Content-Type': 'application/json',
-//         },
-//         body: json.encode({
-//           'fieldEngineerId': widget.fieldEngineer['id'],
-//         }),
-//       );
-
-//       if (acceptResponse.statusCode == 200) {
-//   print('Service request accepted successfully.');
-// } else {
-//   print('Failed to accept service request: ${acceptResponse.statusCode}');
-// }
-
-//       print('Accept response: ${acceptResponse.statusCode}');
-//       print('Accept response body: ${acceptResponse.body}');
-
-//       if (acceptResponse.statusCode == 200) {
-//         final serviceRequest = serviceRequests.firstWhere(
-//           (sr) => sr['id'] == serviceRequestId,
-//           orElse: () => null,
-//         );
-
-//         if (serviceRequest != null) {
-//           final branch = branches.firstWhere(
-//             (b) => b['id'].toString() == serviceRequest['branchId'].toString(),
-//             orElse: () => null,
-//           );
-
-//           if (branch != null) {
-//             final routeData = await getMapboxRoute(
-//               widget.fieldEngineer['currentLatitude'].toDouble(),
-//               widget.fieldEngineer['currentLongitude'].toDouble(),
-//               branch['latitude'].toDouble(),
-//               branch['longitude'].toDouble(),
-//             );
-
-//             if (routeData != null) {
-//               final routeCoordinates = routeData['geometry']['coordinates'];
-//               final startTime = DateTime.now().toLocal();
-//               final durationMinutes = (routeData['duration'] / 60).round();
-//               final etaTime = startTime.add(Duration(minutes: durationMinutes));
-//               final distanceInKm = routeData['distance'] / 1000;
-
-//               await startFieldEngineerNavigation(
-//                 widget.fieldEngineer['id'],
-//                 widget.fieldEngineer['name'],
-//                 routeCoordinates,
-//               );
-
-//               final newRouteData = {
-//                 'id': DateTime.now().millisecondsSinceEpoch,
-//                 'feId': widget.fieldEngineer['id'],
-//                 'feName': widget.fieldEngineer['name'],
-//                 'branchId': branch['id'],
-//                 'branchName': branch['name'],
-//                 'startTime': startTime.toLocal().toString().substring(11, 16),
-//                 'estimatedArrival': etaTime.toLocal().toString().substring(11, 16),
-//                 'distance': formatDistance(routeData['distance'].toDouble()),
-//                 'duration': '${durationMinutes} min',
-//                 'price': calculateFare(distanceInKm),
-//                 'status': 'in-progress',
-//                 'serviceRequestId': serviceRequestId,
-//                 'routeCoordinates': routeCoordinates,
-//               };
-
-//               await createNewRoute(newRouteData);
-//               await triggerWebAdminUpdate(serviceRequestId, widget.fieldEngineer['id']);
-
-//               setState(() {
-//                 ongoingRoutes.add(newRouteData);
-//               });
-
-//               Navigator.of(context).pop();
-              
-//               ScaffoldMessenger.of(context).showSnackBar(
-//                 SnackBar(
-//                   content: Text('✅ Service request accepted!\n🚗 Navigation started!\n📍 Web admin updated!'),
-//                   backgroundColor: Colors.green,
-//                   duration: Duration(seconds: 3),
-//                 ),
-//               );
-
-//               await Future.delayed(Duration(seconds: 2));
-//               fetchServiceRequests();
-
-//             } else {
-//               Navigator.of(context).pop();
-//               ScaffoldMessenger.of(context).showSnackBar(
-//                 SnackBar(
-//                   content: Text('Service request accepted, but failed to get route'),
-//                   backgroundColor: Colors.orange,
-//                 ),
-//               );
-//             }
-//           } else {
-//             Navigator.of(context).pop();
-//             ScaffoldMessenger.of(context).showSnackBar(
-//               SnackBar(
-//                 content: Text('Service request accepted, but branch not found'),
-//                 backgroundColor: Colors.orange,
-//               ),
-//             );
-//           }
-//         }
-//       } else {
-//         Navigator.of(context).pop();
-//         ScaffoldMessenger.of(context).showSnackBar(
-//           SnackBar(
-//             content: Text('Failed to accept request: ${acceptResponse.statusCode}'),
-//             backgroundColor: Colors.red,
-//           ),
-//         );
-//       }
-//     } catch (e) {
-//       if (Navigator.canPop(context)) {
-//         Navigator.of(context).pop();
-//       }
-      
-//       print('Error accepting request: $e');
-//       ScaffoldMessenger.of(context).showSnackBar(
-//         SnackBar(
-//           content: Text('Error accepting request: $e'),
-//           backgroundColor: Colors.red,
-//         ),
-//       );
-//     }
-//   }
 
   Future<void> stopNavigation(Map<String, dynamic> route) async {
     try {
       await http.post(
-        Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/Test/stopNavigation'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({
-          'fieldEngineerId': route['feId'],
-        }),
+        Uri.parse(
+          'https://ecsmapappwebadminbackend-production.up.railway.app/api/Test/stopNavigation',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'fieldEngineerId': route['feId']}),
       );
-      
 
       if (route['id'] != null) {
         await http.delete(
-          Uri.parse('https://ecsmapappwebadminbackend-production.up.railway.app/api/Routes/${route['id']}'),
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          Uri.parse(
+            'https://ecsmapappwebadminbackend-production.up.railway.app/api/Routes/${route['id']}',
+          ),
+          headers: {'Content-Type': 'application/json'},
         );
       }
       _locationService.stopHistoryBatching();
 
       setState(() {
         ongoingRoutes.removeWhere((r) => r['id'] == route['id']);
-         _proximityCheckTimer?.cancel();
+        _proximityCheckTimer?.cancel();
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1200,270 +1091,248 @@ Future<void> _checkForActiveAssignmentOnStartup() async {
       print('Error stopping navigation: $e');
     }
   }
-  
 
-   @override
-Widget build(BuildContext context) {
-  if (_isNavigationMode){
-    return _buildNavigationView();  
-    }
-    else{
-  return Stack(
-    children: [
-      Scaffold(
-        extendBodyBehindAppBar: true,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          title: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(30.0),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.15),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Text(
-              widget.title,
-              style: TextStyle(
-                color: Colors.black,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-          ),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: CircleAvatar(
-                backgroundColor: Colors.white,
-                child: IconButton(
-                  icon: Icon(Icons.settings, color: Colors.blue.shade800),
+  @override
+  Widget build(BuildContext context) {
+    if (_isNavigationMode) {
+      return _buildNavigationView();
+    } else {
+      return Stack(
+        children: [
+          Scaffold(
+            extendBodyBehindAppBar: true,
+             appBar: AppBar(
+              title: Text(widget.title),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.person_outline),
                   onPressed: _showFieldEngineerInfoDialog,
                 ),
-              ),
-            ),
-          ],
-        ),
-        body: Stack(
-          children: [
-            _buildMapboxMap(),
-            _buildBottomSheet(),
-          ],
-        ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () {
-            fetchServiceRequests();
-            fetchBranches();
-          },
-          tooltip: 'Refresh',
-          child: const Icon(Icons.refresh),
-        ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        bottomNavigationBar: _buildBottomNavigationBar(), // Add this here
-      ),
-      Transform.translate(
-        offset: Offset(MediaQuery.of(context).size.width, 0),
-        child: RepaintBoundary(
-          key: _branchIconKey,
-          child: _buildBranchIconWidget(),
-        ),
-      ),
-    ],
-  );
-    }
-}
-
-
-Widget _buildNavigationView() {
-  // Ensure we have an active route before building
-  if (_activeNavigationRoute == null) {
-    return const Scaffold(body: Center(child: Text("Loading Navigation...")));
-  }
-
-  return Scaffold(
-    body: Stack(
-      children: [
-        // The map takes up the full screen
-        _buildMapboxMap(),
-
-        // Glassmorphism Top Panel
-        Positioned(
-  top: 40,
-  left: 10,
-  right: 10,
-  child: SafeArea(
-    // NEW: We wrap the content in our glassmorphism widgets
-    child: Container(
-      // The main container provides the shape, border, and shadow
-      decoration: BoxDecoration(
-        color: Colors.grey.shade400.withOpacity(0.25),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.black.withOpacity(  0.1),
-          width: 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-          )
-        ],
-      ),
-      // Clip the blur to the rounded corners
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        
-        // Apply the blur effect
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
-          // The actual content goes here, inside another Container for padding
-          child: Container(
-            padding: const EdgeInsets.all(12.0),
-            child: Row(
-              children: [
-                const Icon(Icons.navigation, color: Colors.white, size: 40),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Proceed to destination",
-                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black.withOpacity(0.5))]),
-                      ),
-                      Text(
-                        _activeNavigationRoute!['branchName'],
-                        style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                )
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () {
+                    fetchServiceRequests();
+                    fetchBranches();
+                  },
+                  tooltip: 'Refresh',
+                ),
               ],
             ),
-          ),
-        ),
-      ),
-    ),
-  ),
-),
-        // Positioned(
-        //   top: 40,
-        //   left: 10,
-        //   right: 10,
-        //   child: SafeArea(
-        //     child: Card(
-        //       elevation: 8,
-        //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        //       child: Container(
-        //         padding: const EdgeInsets.all(12.0),
-        //         decoration: BoxDecoration(
-        //           color: Colors.blue.shade700,
-        //           borderRadius: BorderRadius.circular(12)
-        //         ),
-        //         child: Row(
-        //           children: [
-        //             const Icon(Icons.navigation, color: Colors.white, size: 40),
-        //             const SizedBox(width: 10),
-        //             Expanded(
-        //               child: Column(
-        //                 crossAxisAlignment: CrossAxisAlignment.start,
-        //                 children: [
-        //                   Text(
-        //                     "Proceed to destination", // This would be dynamic in a real turn-by-turn app
-        //                     style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-        //                   ),
-        //                   Text(
-        //                     _activeNavigationRoute!['branchName'],
-        //                     style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14),
-        //                     overflow: TextOverflow.ellipsis,
-        //                   ),
-        //                 ],
-        //               ),
-        //             )
-        //           ],
-        //         ),
-        //       ),
-        //     ),
-        //   ),
-        // ),
-
-        // Bottom Summary Panel
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.grey.shade400.withOpacity(0.5),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
-              border: Border.all(color: Colors.black.withOpacity(0.1), width: 1.5),
+            body: Stack(children: [_buildMapboxMap(), _buildBottomSheet()]),
+            floatingActionButton: FloatingActionButton(
+              onPressed: () {
+                fetchServiceRequests();
+                fetchBranches();
+              },
+              tooltip: 'Refresh',
+              child: const Icon(Icons.refresh),
             ),
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+            floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+            bottomNavigationBar: _buildBottomNavigationBar(), // Add this here
+          ),
+          Transform.translate(
+            offset: Offset(MediaQuery.of(context).size.width, 0),
+            child: RepaintBoundary(
+              key: _branchIconKey,
+              child: _buildBranchIconWidget(),
+            ),
+          ),
+        ],
+      );
+    }
+  }
+
+  Widget _buildNavigationView() {
+    // Ensure we have an active route before building
+    if (_activeNavigationRoute == null) {
+      return const Scaffold(body: Center(child: Text("Loading Navigation...")));
+    }
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          _buildMapboxMap(),
+
+          Positioned(
+            top: 40,
+            left: 10,
+            right: 10,
+            child: SafeArea(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.black.withOpacity(0.1),
+                    width: 1.0,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                // Clip the blur to the rounded corners
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+
+                  // Apply the blur effect
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+                    // The actual content goes here, inside another Container for padding
+                    child: Container(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Row(
                         children: [
-                          _buildNavigationInfo("ETA", _activeNavigationRoute!['estimatedArrival'], Icons.access_time),
-                          _buildNavigationInfo("Distance", _activeNavigationRoute!['distance'], Icons.straighten),
-                          _buildNavigationInfo("Fare", _activeNavigationRoute!['price'], Icons.attach_money),
+                          const Icon(
+                            Icons.navigation,
+                            color: Colors.white,
+                            size: 40,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Proceed to destination",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    shadows: [
+                                      Shadow(
+                                        blurRadius: 2,
+                                        color: Colors.black.withOpacity(0.5),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  _activeNavigationRoute!['branchName'],
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.9),
+                                    fontSize: 14,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _stopNavigationMode,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                        ),
-                        child: const Text("End Navigation"),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
+
+          // Bottom Summary Panel
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.grey.shade400.withOpacity(0.5),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20.0),
+                ),
+                border: Border.all(
+                  color: Colors.black.withOpacity(0.1),
+                  width: 1.5,
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20.0),
+                ),
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _buildNavigationInfo(
+                              "ETA",
+                              _activeNavigationRoute!['estimatedArrival'],
+                              Icons.access_time,
+                            ),
+                            _buildNavigationInfo(
+                              "Distance",
+                              _activeNavigationRoute!['distance'],
+                              Icons.straighten,
+                            ),
+                            _buildNavigationInfo(
+                              "Fare",
+                              _activeNavigationRoute!['price'],
+                              Icons.attach_money,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _stopNavigationMode,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 50,
+                              vertical: 15,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                          ),
+                          child: const Text("End Navigation"),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavigationInfo(String label, String value, IconData icon) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: Colors.white70, size: 24),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(
+          label,
+          style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12),
         ),
       ],
-    ),
-  );
-}
-
-
-Widget _buildNavigationInfo(String label, String value, IconData icon) {
-  return Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(icon, color: Colors.white70, size: 24),
-      const SizedBox(height: 4),
-      Text(value, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-      Text(label, style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12)),
-    ],
-  );
-}
-
+    );
+  }
 
   Widget _buildMapboxMap() {
-    final engineerLat = widget.fieldEngineer['currentLatitude']?.toDouble() ?? 14.5995;
-  final engineerLng = widget.fieldEngineer['currentLongitude']?.toDouble() ?? 120.9842;
-  final engineerPosition = Position(engineerLng, engineerLat);
-  
+    final engineerLat =
+        widget.fieldEngineer['currentLatitude']?.toDouble() ?? 14.5995;
+    final engineerLng =
+        widget.fieldEngineer['currentLongitude']?.toDouble() ?? 120.9842;
+    final engineerPosition = Position(engineerLng, engineerLat);
+
     return MapWidget(
       key: ValueKey("mapWidget"),
       cameraOptions: CameraOptions(
@@ -1475,109 +1344,122 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
         _mapboxController = controller;
       },
       onMapLoadedListener: (_) async {
-  print("Map has loaded, adding circle marker...");
-  
-  // Ensure the map controller is set
-  if (_mapboxController == null) {
-    print("❌ Mapbox controller is null.");
-    return;
-  }
+        print("Map has loaded, adding circle marker...");
 
-  // Add the circle marker for the engineer's position
-  final engineerLat = widget.fieldEngineer['currentLatitude']?.toDouble() ?? 14.5995;
-  final engineerLng = widget.fieldEngineer['currentLongitude']?.toDouble() ?? 120.9842;
-  final engineerPosition = Position(engineerLng, engineerLat);
-  await _addCircleMarker(engineerPosition);
+        // Ensure the map controller is set
+        if (_mapboxController == null) {
+          print("❌ Mapbox controller is null.");
+          return;
+        }
 
-  // Ensure branches are loaded
-  if (branches.isEmpty) {
-    print("❌ Branches list is empty. Fetching branches...");
-    await fetchBranches();
-  }
+        // Add the circle marker for the engineer's position
+        final engineerLat =
+            widget.fieldEngineer['currentLatitude']?.toDouble() ?? 14.5995;
+        final engineerLng =
+            widget.fieldEngineer['currentLongitude']?.toDouble() ?? 120.9842;
+        final engineerPosition = Position(engineerLng, engineerLat);
+        await _addCircleMarker(engineerPosition);
 
-  // Ensure branch icon bytes are captured
-  if (_branchIconBytes == null) {
-    print("❌ Branch icon bytes are null. Capturing icon...");
-    _branchIconBytes = await _captureIconAsBytes();
-    if (_branchIconBytes == null) {
-      print("❌ Failed to capture branch icon bytes.");
-      return;
-    }
-  }
+        // Ensure branches are loaded
+        if (branches.isEmpty) {
+          print("❌ Branches list is empty. Fetching branches...");
+          await fetchBranches();
+        }
 
-  // Add branch markers
-  if (branches.isNotEmpty && _branchIconBytes != null) {
-    print("✅ Adding branch markers...");
-    await _addBranchMarkers(branches);
-  } else {
-    print("❌ Cannot add branch markers. Dependencies are missing.");
-  }
+        // Ensure branch icon bytes are captured
+        if (_branchIconBytes == null) {
+          print("❌ Branch icon bytes are null. Capturing icon...");
+          _branchIconBytes = await _captureIconAsBytes();
+          if (_branchIconBytes == null) {
+            print("❌ Failed to capture branch icon bytes.");
+            return;
+          }
+        }
 
-  if (_isNavigationMode && _activeNavigationRoute != null) {
-        print("✅ In Navigation Mode, drawing route...");
-        await _drawRouteOnMap(_activeNavigationRoute!['routeCoordinates']);
-      }
-},
+        // Add branch markers
+        if (branches.isNotEmpty && _branchIconBytes != null) {
+          print("✅ Adding branch markers...");
+          await _addBranchMarkers(branches);
+        } else {
+          print("❌ Cannot add branch markers. Dependencies are missing.");
+        }
+
+        if (_isNavigationMode && _activeNavigationRoute != null) {
+          print("✅ In Navigation Mode, drawing route...");
+          await _drawRouteOnMap(_activeNavigationRoute!['routeCoordinates']);
+        }
+      },
     );
   }
 
-  Widget _buildBottomSheet() {
+  // lib/screens/home_screen.dart -> _MyHomePageState
+
+Widget _buildBottomSheet() {
+  final colorScheme = Theme.of(context).colorScheme;
+
   return DraggableScrollableSheet(
-    initialChildSize: 0.6, // Starts at 40% of the screen height
-    minChildSize: 0.15,    // Can be dragged down to 15%
-    maxChildSize: 0.9,     // Can be dragged up to 90%
+    initialChildSize: 0.6,
+    minChildSize: 0.2,
+    maxChildSize: 0.9,
     builder: (BuildContext context, ScrollController scrollController) {
-  
       return Container(
         decoration: BoxDecoration(
-      
-          color: Colors.white.withOpacity(0.35),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
- 
-          border: Border.all(
-            color: Colors.black.withOpacity(0.2),
-            width: 1.5,
+          // Use Material 3 surface color with elevation tint
+          color: ElevationOverlay.applySurfaceTint(
+            colorScheme.surface,
+            colorScheme.surfaceTint,
+            3, // Elevation level
           ),
-          boxShadow: [
-
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 10,
-              spreadRadius: 2,
-            )
-          ],
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28.0)),
         ),
- 
-        child: ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
-
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 15.0, sigmaY: 15.0),
-            child: ListView(
-              controller: scrollController, 
-              padding: EdgeInsets.zero,
-              children: [
-                _buildDragHandle(),
-                
-                _buildFieldEngineerProfile(),
-                Divider(color: Colors.black26, thickness: 1, height: 20, indent: 16, endIndent: 16),
-                //_buildPillButtons(),
-                
-                _buildOngoingRoutesPanel(),
-                 if (ongoingRoutes.isNotEmpty)
-                _buildServiceRequestTimeline(ongoingRoutes.first) 
-              else
-                _buildServiceRequestsList(),
-                
-              ],
+        child: ListView(
+          controller: scrollController,
+          padding: EdgeInsets.zero,
+          children: [
+            // Drag Handle
+            Center(
+              child: Container(
+                width: 32,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12.0),
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurfaceVariant.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
-          ),
+            
+            // The content will be provided by our separated widgets
+            FieldEngineerProfile(
+              fieldEngineer: widget.fieldEngineer,
+              getAddress: _getAddressFromCoordinates,
+            ),
+            
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0),
+              child: Divider(),
+            ),
+
+            if (ongoingRoutes.isNotEmpty)
+              ServiceRequestTimeline(
+                route: ongoingRoutes.first,
+                onFinishService: _finishService,
+                onLeaveBranch: _leaveBranch,
+              )
+            else
+              ServiceRequestList(
+                isLoading: isLoading,
+                serviceRequests: serviceRequests,
+                ongoingRoutes: ongoingRoutes,
+                fieldEngineerId: widget.fieldEngineer['id'],
+                onAcceptRequest: acceptServiceRequest,
+              ),
+          ],
         ),
       );
     },
   );
 }
-
 
   Widget _buildDragHandle() {
     return Center(
@@ -1592,7 +1474,6 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
       ),
     );
   }
-  
 
   Widget _buildFcmStatusBanner() {
     return Container(
@@ -1613,442 +1494,33 @@ Widget _buildNavigationInfo(String label, String value, IconData icon) {
     );
   }
 
-  /// Ongoing Routes" panel
-  Widget _buildOngoingRoutesPanel() {
-  return Container(
-    margin: EdgeInsets.all(12.0),
-    padding: EdgeInsets.all(16.0),
-    decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: [Colors.white, Colors.white],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Ongoing Routes',
-              style: TextStyle(
-                color: Colors.grey,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.yellow.shade300,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '${ongoingRoutes.length}',
-                style: TextStyle(
-                  color: Colors.black,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-        SizedBox(height: 12),
-        if (ongoingRoutes.isEmpty)
-          // ... (yung 'No active routes' widget mo, walang babaguhin dito)
-          Container(
-            padding: EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Center(
-              child: Column(
-                children: [
-                  Icon(Icons.directions_off, color: Colors.grey, size: 32),
-                  SizedBox(height: 8),
-                  Text(
-                    'No active routes at the moment',
-                    style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Accept a service request to start navigation',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          )
-        else
-          Column(
-            children: ongoingRoutes.map((route) {
-              final status = route['status'] as String;
-              Color statusColor;
-              String statusText;
-
-              switch (status) {
-                case 'in-transit':
-                  statusColor = Colors.blue;
-                  statusText = 'In Progress';
-                  break;
-                case 'arrived':
-                  statusColor = Colors.green;
-                  statusText = 'Arrived';
-                  break;
-                case 'finished':
-                   statusColor = Colors.purple;
-                   statusText = 'Finished';
-                   break;
-                default:
-                  statusColor = Colors.grey;
-                  statusText = status;
-              }
-
-              // --- KINUHA NATIN ANG MGA EVENTS DITO ---
-              final events = route['events'] as List;
-              final startTimeEvent = events.isNotEmpty ? events.first['timestamp'] as DateTime? : null;
-
-              return Container(
-                margin: EdgeInsets.only(bottom: 8),
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.black.withOpacity(0.1)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                        // ... (yung FE Name at Branch Name, walang babaguhin dito)
-                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Icon(Icons.person, color: Colors.grey, size: 16),
-                                          SizedBox(width: 4),
-                                          Text(
-                                            route['feName'],
-                                            style: TextStyle(
-                                              color: Colors.grey,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 16,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      Row(
-                                        children: [
-                                          Icon(Icons.location_on, color: Colors.grey, size: 14),
-                                          SizedBox(width: 4),
-                                          Expanded(
-                                            child: Text(
-                                              'to ${route['branchName']}',
-                                              style: TextStyle(
-                                                color: Colors.grey,
-                                                fontSize: 12,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: statusColor.withOpacity(0.8),
-                                    border: Border.all(color: Colors.black.withOpacity(0.1)),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    statusText,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                    SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        Column(
-                          children: [
-                            Icon(Icons.straighten, color: Colors.grey, size: 14),
-                            Text('Distance', style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
-                            Text(
-                              route['distance'] ?? '...',
-                              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                        Column(
-                          children: [
-                            Icon(Icons.access_time, color: Colors.grey, size: 14),
-                            Text('ETA', style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
-                            Text(
-                              // --- ITO ANG BINAGO PARA SA ETA ---
-                              route['estimatedArrival'] != null
-                                  ? DateFormat('hh:mm a').format(route['estimatedArrival'] as DateTime)
-                                  : '...',
-                              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                        Column(
-                          children: [
-                            Icon(Icons.attach_money, color: Colors.grey, size: 14),
-                            Text('Fare', style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
-                            Text(
-                              route['price'] ?? '...',
-                              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.play_arrow, color: Colors.white70, size: 14),
-                            SizedBox(width: 4),
-                            Text(
-                              // --- ITO ANG BINAGO PARA SA START TIME ---
-                              'Started: ${startTimeEvent != null ? DateFormat('hh:mm a').format(startTimeEvent) : '...'}',
-                              style: TextStyle(color: Colors.grey, fontSize: 10),
-                            ),
-                          ],
-                        ),
-                        // ... (yung stop button mo, walang babaguhin dito)
-                        ElevatedButton(
-                                  onPressed: () => stopNavigation(route),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                    
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.stop, size: 12, color: Colors.white),
-                                      SizedBox(width: 4),
-                                      Text(
-                                        'Stop',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 10,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-      ],
-    ),
-  );
-}
   Widget _buildBranchIconWidget() {
-  return Container(
-    width: 40,
-    height: 40,
-    decoration: BoxDecoration(
-      color: Colors.green.shade700,
-      shape: BoxShape.circle,
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.3),
-          blurRadius: 4,
-          offset: const Offset(0, 2),
-        ),
-      ],
-    ),
-    child: const Icon(
-      Icons.account_balance,
-      color: Colors.white,
-      size: 24,
-    ),
-  );
-}
-
-
-
-
-//Widget for bottom navigation bar
-Widget _buildBottomNavigationBar() {
-  return BottomNavigationBar(
-    items: const [
-      BottomNavigationBarItem(
-        icon: Icon(Icons.home),
-        label: 'Home',
-      ),
-      BottomNavigationBarItem(
-        icon: Icon(Icons.history),
-        label: 'History',
-      ),
-      BottomNavigationBarItem(
-        icon: Icon(Icons.settings),
-        label: 'Settings',
-      ),
-    ],
-    
-  );
-}
-Widget _buildServiceRequestCard(Map<String, dynamic> request) {
-  bool isAssignedToMe = request['fieldEngineerId'] == widget.fieldEngineer['id'];
-  bool isUnassigned = request['fieldEngineerId'] == null;
-  bool hasOngoingRoute = ongoingRoutes.any((route) => route['serviceRequestId'] == request['id']);
-
-  return Container(
-    margin: const EdgeInsets.only(bottom: 12.0),
-    padding: const EdgeInsets.all(16.0),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: Colors.black.withOpacity(0.1)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // Branch Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                   Text(
-                    'Available Service Requests',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    request['branch']?['name'] ?? 'Unknown Branch',
-                    style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 16),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(Icons.location_on, color: Colors.grey, size: 14),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          request['branch']?['address'] ?? 'No address',
-                          style: const TextStyle(color: Colors.grey, fontSize: 12),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            // Status Tag
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: isUnassigned ? Colors.orange.withOpacity(0.8) : Colors.green.withOpacity(0.8),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                isUnassigned ? 'Pending' : (hasOngoingRoute ? 'Active' : 'Accepted'),
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        const Divider(color: Colors.white24, height: 24),
-        // Action Button
-        if (isUnassigned)
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => {
-                HapticFeedback.lightImpact(),
-                acceptServiceRequest(request['id'])
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              icon: const Icon(Icons.check_circle_outline, size: 18),
-              label: const Text('Accept Request'),
-            ),
-          ),
-      ],
-    ),
-  );
-}
-
-  Widget _buildServiceRequestsList() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-         
-          const SizedBox(height: 2),
-          if (isLoading)
-            const Center(child: Padding(
-              padding: EdgeInsets.all(32.0),
-              child: CircularProgressIndicator(),
-            ))
-          else if (serviceRequests.isEmpty)
-            // ... (Your "No service requests" widget)
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.inbox_outlined, size: 64, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text('No service requests found', style: TextStyle(color: Colors.grey, fontSize: 16)),
-                ],
-              ),
-            )
-          else
-
-            ListView(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
-            children: serviceRequests
-                .map((request) => _buildServiceRequestCard(request))
-                .toList(),
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.green.shade700,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
+      child: const Icon(Icons.account_balance, color: Colors.white, size: 24),
+    );
+  }
+
+  //Widget for bottom navigation bar
+  Widget _buildBottomNavigationBar() {
+    return BottomNavigationBar(
+      items: const [
+        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+        BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
+        BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+      ],
     );
   }
 
@@ -2072,8 +1544,10 @@ Widget _buildServiceRequestCard(Map<String, dynamic> request) {
               Text('Lat: ${widget.fieldEngineer['currentLatitude']}'),
               Text('Lng: ${widget.fieldEngineer['currentLongitude']}'),
               if (fcmToken != null)
-                Text('FCM: ${fcmToken!.substring(0, 20)}...',
-                    style: TextStyle(fontSize: 10)),
+                Text(
+                  'FCM: ${fcmToken!.substring(0, 20)}...',
+                  style: TextStyle(fontSize: 10),
+                ),
             ],
           ),
         ),
@@ -2083,251 +1557,7 @@ Widget _buildServiceRequestCard(Map<String, dynamic> request) {
             child: Text('OK'),
           ),
         ],
-        
-      ),
-      
-    );
-  }
-
-
-  // 3 pill buttons at the top of the bottom sheet
-  Widget _buildPillButtons() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _buildPillButton('All'),
-        _buildPillButton('Active'),
-        _buildPillButton('Completed'),
-      ],
-    );
-  }
-
-  Widget _buildPillButton(String label) {
-    return GestureDetector(
-      onTap: () {
-        // Handle pill button tap
-      },
-      child: Container(
-        padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12.0),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4.0,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
       ),
     );
   }
-
-
-  //Widget for FE's profile picture, name, Current location, and time
- Widget _buildFieldEngineerProfile() {
-  return Padding(
-    padding: const EdgeInsets.all(15.0),
-    child: Row(
-      children: [
-        Column(
-          children: [
-            CircleAvatar(
-              radius: 40,
-              backgroundImage: AssetImage('assets/profile.jpg'),
-            ),
-            // SizedBox(height: 8),
-            // Text(
-            //   'Battery: $_batteryLevel%',
-            //   style: TextStyle(fontSize: 12, color: Colors.black),
-            // ),
-          ],
-        ),
-        SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.fieldEngineer['name'] ?? 'Field Engineer',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
-            ),
-            SizedBox(height: 4),
-            FutureBuilder<String>(
-              future: _getAddressFromCoordinates(
-                widget.fieldEngineer['currentLatitude']?.toDouble() ?? 0.0,
-                widget.fieldEngineer['currentLongitude']?.toDouble() ?? 0.0,
-              ),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Row(
-                    children: [
-                      Icon(Icons.location_on, color: Colors.black, size: 14),
-                      SizedBox(width: 4),
-                      Text(
-                        "Fetching address...",
-                        style: TextStyle(color: Colors.black, fontSize: 12),
-                      ),
-                    ],
-                  );
-                } else if (snapshot.hasError) {
-                  return Text(
-                    "Error fetching address",
-                    style: TextStyle(color: Colors.red, fontSize: 12),
-                  );
-                } else {
-                  return Text(
-                    snapshot.data ?? "Address not found",
-                    style: TextStyle(color: Colors.black, fontSize: 12),
-                  );
-                }
-              },
-            ),
-            Row(
-              children: [
-                Icon(Icons.access_time, color: Colors.black, size: 14),
-                SizedBox(width: 4),
-                Text(
-                  'Since ${DateFormat('hh:mm a').format(DateTime.now())}',
-                  style: TextStyle(color: Colors.black, fontSize: 12),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
-
-//Service request timeline widget
-// home_screen.dart
-
-Widget _buildServiceRequestTimeline(Map<String, dynamic> route) {
-  final events = route['events'] as List<Map<String, dynamic>>;
-  final status = route['status'];
-
-  // Listahan ng lahat ng posibleng steps
-  final allSteps = ['Accepted', 'In Transit', 'Arrived', 'Finished Service', 'Left Branch'];
-
-  // Function para kunin ang event data kung tapos na
-  Map<String, dynamic>? findEvent(String status) {
-    try {
-      return events.firstWhere((e) => e['status'] == status);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  return Container(
-    margin: EdgeInsets.all(12.0),
-    padding: EdgeInsets.all(16.0),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Activity for ${route['branchName']}',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
-        ),
-        SizedBox(height: 20),
-        Timeline.tileBuilder(
-          shrinkWrap: true,
-          physics: NeverScrollableScrollPhysics(),
-          theme: TimelineThemeData(
-            nodePosition: 0,
-            connectorTheme: ConnectorThemeData(thickness: 2.0),
-            indicatorTheme: IndicatorThemeData(size: 20.0),
-          ),
-          builder: TimelineTileBuilder.connected(
-            itemCount: allSteps.length,
-            connectionDirection: ConnectionDirection.before,
-            contentsBuilder: (context, index) {
-              final stepStatus = allSteps[index];
-              final event = findEvent(stepStatus);
-
-              return Padding(
-                padding: const EdgeInsets.only(left: 12.0, bottom: 20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      stepStatus,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: event != null ? Colors.black : Colors.grey,
-                      ),
-                    ),
-                    if (event != null)
-                      Text(
-                        DateFormat('hh:mm a').format(event['timestamp']),
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
-                      ),
-                  ],
-                ),
-              );
-            },
-            indicatorBuilder: (context, index) {
-              final event = findEvent(allSteps[index]);
-              final isCurrent = allSteps[index] == 'In Transit' && status == 'in-transit' ||
-                                allSteps[index] == 'Arrived' && status == 'arrived';
-
-              if (event != null) {
-                if(isCurrent){
-                   return DotIndicator(color: Colors.blue,);
-                }
-                return DotIndicator(color: Colors.green, child: Icon(Icons.check, color: Colors.white, size: 12));
-              } else {
-                return OutlinedDotIndicator(color: Colors.grey.shade300, borderWidth: 2);
-              }
-            },
-            connectorBuilder: (context, index, type) {
-              // Kulayan ang connector kung tapos na ang naunang step
-              if (index > 0) {
-                final prevEvent = findEvent(allSteps[index - 1]);
-                if (prevEvent != null) {
-                  return SolidLineConnector(color: Colors.green);
-                }
-              }
-              return SolidLineConnector(color: Colors.grey.shade300);
-            },
-          ),
-        ),
-        // --- MGA BUTTONS (walang pagbabago dito) ---
-        if (status == 'arrived')
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => _finishService(route),
-              icon: Icon(Icons.check_circle_outline),
-              label: Text('Mark as Finished'),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green, foregroundColor: Colors.white),
-            ),
-          ),
-        if (status == 'finished')
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => _leaveBranch(route),
-              icon: Icon(Icons.directions_walk),
-              label: Text('Leave Branch'),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange, foregroundColor: Colors.white),
-            ),
-          ),
-      ],
-    ),
-  );
-}
 }

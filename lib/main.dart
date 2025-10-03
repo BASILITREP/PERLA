@@ -44,14 +44,35 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    
+    const seedColor = Color(0xFF0066B2); 
+
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'PERLA Field App',
       theme: ThemeData(
-        textTheme: GoogleFonts.lexendTextTheme(
-          Theme.of(context).textTheme,
+
+        useMaterial3: true,
+
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: seedColor,
+          brightness: Brightness.light,
         ),
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+
+        textTheme: GoogleFonts.outfitTextTheme(
+          ThemeData(brightness: Brightness.light).textTheme,
+        ),
       ),
+      // darkTheme: ThemeData(
+      //   useMaterial3: true,
+      //   colorScheme: ColorScheme.fromSeed(
+      //     seedColor: seedColor,
+      //     brightness: Brightness.dark,
+      //   ),
+      //   textTheme: GoogleFonts.lexendTextTheme(
+      //     ThemeData(brightness: Brightness.dark).textTheme,
+      //   ),
+      // ),
+      themeMode: ThemeMode.system, 
       home: const LoginPage(),
       debugShowCheckedModeBanner: false,
     );
