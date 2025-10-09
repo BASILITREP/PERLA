@@ -1,11 +1,9 @@
-
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'home_screen.dart';
-
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -63,9 +61,11 @@ class _LoginPageState extends State<LoginPage> {
               ),
             );
           } on PlatformException catch (e) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Error with biometrics: ${e.message}')),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error with biometrics: ${e.message}')),
+              );
+            }
             setState(() => isLoading = false);
             return;
           }
@@ -77,7 +77,7 @@ class _LoginPageState extends State<LoginPage> {
               context,
               MaterialPageRoute(
                 builder: (context) => MyHomePage(
-                  title: 'PERLA - ${engineer['name']}',
+                  title: 'Hello, ${engineer['name']}',
                   fieldEngineer: engineer,
                 ),
               ),
@@ -115,57 +115,136 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
     return Scaffold(
-      body: Container(
-        // Background gradient to match the design
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.grey.shade200,
-              Colors.grey.shade50,
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Image.asset(
-                    'assets/equicomLogo.png',
-                    height: 100,
-                    fit: BoxFit.contain,
+      backgroundColor: colorScheme.surface,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Logo Section
+                Card(
+                  elevation: 0,
+                  color: colorScheme.surfaceContainer,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  const SizedBox(height: 20),
-
-                  // Header Text
-                  const Text(
-                    'Welcome to MAPA!',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Image.asset(
+                            'assets/equicomLogo.png',
+                            height: 80,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Welcome to MAPA!',
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: colorScheme.onSurface,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Please login to continue',
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Text(
-                    "Please login to continue",
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.grey[600],
+                ),
+                
+                const SizedBox(height: 32),
+                
+                // Email Input Section
+                TextFormField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    labelText: 'Email Address',
+                    hintText: 'Enter your email',
+                    prefixIcon: Icon(
+                      Icons.email_outlined,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    filled: true,
+                    fillColor: colorScheme.surfaceContainer,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(
+                        color: colorScheme.outline.withOpacity(0.3),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(
+                        color: colorScheme.primary,
+                        width: 2,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 50),
-                  _buildEmailTextField(),
-                  const SizedBox(height: 25),
-                  _buildBiometricsButton(),
-                  const SizedBox(height: 40),
-
-                ],
-              ),
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // Login Button
+                FilledButton.icon(
+                  onPressed: isLoading ? null : _login,
+                  icon: isLoading 
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: colorScheme.onPrimary,
+                        ),
+                      )
+                    : Icon(Icons.fingerprint),
+                  label: Text(
+                    isLoading ? 'Authenticating...' : 'Login with Biometrics',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+                
+               
+                
+                
+             
+                
+                
+              ],
             ),
           ),
         ),
@@ -173,150 +252,17 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // Helper method for the Email Text Field
-  Widget _buildEmailTextField() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: TextField(
-        controller: _emailController,
-        keyboardType: TextInputType.emailAddress,
-        decoration: InputDecoration(
-          hintText: 'Enter Email',
-          hintStyle: TextStyle(color: Colors.grey[400]),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+  
+
+  void _showNotImplemented(String feature) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$feature not implemented'),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
         ),
       ),
-    );
-  }
-
-  // Helper method for the Biometrics Button
-  Widget _buildBiometricsButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: isLoading ? null : _login,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF00C89C),
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 5,
-          shadowColor: const Color(0xFF00C89C).withOpacity(0.4),
-        ),
-        child: isLoading
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 3,
-                ),
-              )
-            : const Text(
-                'Login with Biometrics',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-      ),
-    );
-  }
-
-  // Helper method for the divider
-  Widget _buildDivider() {
-    return Row(
-      children: [
-        Expanded(child: Divider(color: Colors.grey[300])),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Text(
-            'or continue with',
-            style: TextStyle(color: Colors.grey[600]),
-          ),
-        ),
-        Expanded(child: Divider(color: Colors.grey[300])),
-      ],
-    );
-  }
-
-  // Helper method for the social login buttons row
-  Widget _buildSocialLogins() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        _buildSocialButton('assets/icons/google.png'),
-        const SizedBox(width: 20),
-        _buildSocialButton('assets/icons/apple.png'),
-        const SizedBox(width: 20),
-        _buildSocialButton('assets/icons/facebook.png'),
-      ],
-    );
-  }
-
-  // Reusable widget for a single social login button
-  Widget _buildSocialButton(String imagePath) {
-    return InkWell(
-      onTap: () {
-        // Placeholder for social login functionality
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Social login not implemented')),
-        );
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.white),
-          borderRadius: BorderRadius.circular(16),
-          color: Colors.grey[200],
-        ),
-        child: Image.asset(
-          imagePath,
-          height: 40,
-        ),
-      ),
-    );
-  }
-
-  // Helper method for the "Register Now" text
-  Widget _buildRegisterNow() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          "Don't have an account? ",
-          style: TextStyle(color: Colors.grey[700]),
-        ),
-        GestureDetector(
-          onTap: () {
-            // Placeholder for navigation to a registration screen
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Registration screen not implemented')),
-            );
-          },
-          child: const Text(
-            'Register Now',
-            style: TextStyle(
-              color: Colors.blue,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ],
     );
   }
 
