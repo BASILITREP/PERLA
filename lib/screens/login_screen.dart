@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'home_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -119,7 +120,7 @@ class _LoginPageState extends State<LoginPage> {
     final colorScheme = theme.colorScheme;
     
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: colorScheme.surface, // This will be your purple #6760F6
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -128,89 +129,86 @@ class _LoginPageState extends State<LoginPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Logo Section
-                Card(
-                  elevation: 0,
-                  color: colorScheme.surfaceContainer,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Padding(
+                
+                  Padding(
                     padding: const EdgeInsets.all(24.0),
                     child: Column(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
+                        
+                          // Image.asset(
+                          //   'assets/equicomLogo.png',
+                          //   height: 80,
+                          //   fit: BoxFit.contain,
+                          // ),
+                        
+                        
+                        SizedBox(height: 16),
+                        Text(
+                        'DOROTI',
+                        style: GoogleFonts.libreBaskerville( // Beautiful serif font
+                          fontSize: 64,
+                          fontWeight: FontWeight.w600, // Light weight
+                          fontStyle: FontStyle.italic,  // Italic style
+                          color: Color.fromARGB(255, 246, 255, 168),        // Black text on white card
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                        SizedBox(height: 8),
+                        
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
                             
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Image.asset(
-                            'assets/equicomLogo.png',
-                            height: 80,
-                            fit: BoxFit.contain,
-                          ),
+                            Text(
+                              'Powered by ',
+                              style: GoogleFonts.outfit( // Modern sans-serif font
+                                fontSize: 15,
+                                fontWeight: FontWeight.w400, // Regular weight
+                                color: Colors.white70,        // Subtle white text
+                              ),
+                              
+                            ),
+                            Image(
+                              image: AssetImage('assets/equicomLogo.png'),
+                              height: 20,
+                              fit: BoxFit.contain,
+                            ),
+                            
+                          ],
                         ),
-                        const SizedBox(height: 24),
-                        Text(
-                          'Welcome to MAPA!',
-                          style: theme.textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: colorScheme.onSurface,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Please login to continue',
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
+                        
                       ],
                     ),
                   ),
-                ),
                 
-                const SizedBox(height: 32),
                 
-                // Email Input Section
+                const SizedBox(height: 35),
+                
+                // Email Input Section - WHITE BACKGROUND
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.black87), // Black text
                   decoration: InputDecoration(
                     labelText: 'Email Address',
                     hintText: 'Enter your email',
+                    labelStyle: TextStyle(color: Colors.grey[700]),
+                    hintStyle: TextStyle(color: Colors.grey[500]),
                     prefixIcon: Icon(
                       Icons.email_outlined,
-                      color: colorScheme.onSurfaceVariant,
+                      color: Colors.grey[600],
                     ),
                     filled: true,
-                    fillColor: colorScheme.surfaceContainer,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide(
-                        color: colorScheme.outline.withOpacity(0.3),
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide(
-                        color: colorScheme.primary,
-                        width: 2,
-                      ),
-                    ),
+                    fillColor: Colors.white, // White background
+                    
+                   
+                    
                   ),
                 ),
                 
                 const SizedBox(height: 24),
                 
-                // Login Button
+                // Login Button - Your yellow accent color
                 FilledButton.icon(
                   onPressed: isLoading ? null : _login,
                   icon: isLoading 
@@ -219,31 +217,39 @@ class _LoginPageState extends State<LoginPage> {
                         height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: colorScheme.onPrimary,
+                          color: Colors.black87, // Black loading indicator
                         ),
                       )
-                    : Icon(Icons.fingerprint),
+                    : null,      
                   label: Text(
                     isLoading ? 'Authenticating...' : 'Login with Biometrics',
                     style: const TextStyle(
-                      fontSize: 16,
+                      fontSize: 20,
                       fontWeight: FontWeight.w600,
+                      color: Colors.black87, // Black text on yellow button
                     ),
                   ),
                   style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: colorScheme.primary, // Your yellow #F4FF8B
+                    foregroundColor: Colors.black87, // Black text/icons
+                    padding: const EdgeInsets.symmetric(vertical: 20),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(50),
                     ),
                   ),
                 ),
                 
-               
+                const SizedBox(height: 24),
                 
-                
-             
-                
-                
+                // Optional: Add app version or footer text
+                Text(
+                  'Version 1.0.0',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
               ],
             ),
           ),

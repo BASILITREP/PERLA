@@ -64,7 +64,9 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const seedColor = Color(0xFF0066B2);
+    // Custom colors - UPDATED
+    const primaryColor = Color.fromARGB(255, 116, 109, 241); // Deep purple background
+    const accentColor = Color.fromARGB(255, 246, 255, 168);  // Bright yellow-green accent
 
     return MaterialApp(
       title: 'Dorothy',
@@ -72,11 +74,56 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: seedColor,
+          seedColor: primaryColor,
           brightness: Brightness.light,
+          // Override specific colors for better contrast
+          surface: primaryColor,           // Background color
+          onSurface: Colors.white,        // Text on background
+          primary: accentColor,           // Button color
+          onPrimary: Colors.black87,      // Text on buttons (BLACK for yellow)
+          primaryContainer: accentColor,   // FAB background
+          onPrimaryContainer: Colors.black87, // FAB text/icons (BLACK for yellow)
+          secondary: accentColor.withOpacity(0.8),
+          tertiary: accentColor.withOpacity(0.6),
         ),
+        // Custom button themes for consistent yellow-green buttons
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: accentColor,
+            foregroundColor: Colors.black87, // BLACK text on yellow
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: accentColor,
+            foregroundColor: Colors.black87, // BLACK text on yellow
+          ),
+        ),
+        floatingActionButtonTheme: FloatingActionButtonThemeData(
+          backgroundColor: accentColor,
+          foregroundColor: Colors.black87, // BLACK icons on yellow
+        ),
+        // App bar with deep purple background
+        appBarTheme: AppBarTheme(
+          backgroundColor: primaryColor,
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        // Card theme for better contrast
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        // Scaffold background
+        scaffoldBackgroundColor: primaryColor,
         textTheme: GoogleFonts.outfitTextTheme(
           ThemeData(brightness: Brightness.light).textTheme,
+        ).apply(
+          bodyColor: Colors.white,
+          displayColor: Colors.white,
         ),
       ),
       home: const LoginPage(),
